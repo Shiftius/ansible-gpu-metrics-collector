@@ -1,0 +1,160 @@
+---
+# tasks file for telegraf_config
+
+- name: Load environment facts
+  include_tasks: tasks/env_facts.yml
+
+### Pkg: influxdata prereq
+
+- name: Add InfluxData repository key
+  shell: |
+    curl -s https://repos.influxdata.com/influxdata-archive_compat.key > influxdata-archive_compat.key
+    echo '393e8779c89ac8d958f81f942f9ad7fb82a25e133faddaf92e15b16e6ac9ce4c influxdata-archive_compat.key' | sha256sum -c && cat influxdata-archive_compat.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg > /dev/null
+  register: key_result
+  changed_when: key_result.stdout != ""
+  failed_when: key_result.stderr != ""
+
+- name: Add InfluxData repository source list
+  apt_repository:
+    repo: 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main'
+    filename: influxdata
+    state: present
+  register: influx_repo
+  retries: 10
+  until: influx_repo is success
+
+### Pkg: grafana prereq
+
+- name: Add Grafana repository key
+  shell: |
+    curl -s https://apt.grafana.com/gpg.key > /usr/share/keyrings/grafana.key
+  register: key_result_grafana
+  changed_when: key_result_grafana.stdout != ""
+  failed_when: key_result_grafana.stderr != ""
+
+- name: Add Grafana repository source list
+  apt_repository:
+    repo: 'deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main'
+    filename: grafana
+    state: present
+  register: grafana_repo
+  retries: 10
+  until: grafana_repo is success
+
+### Pkg: apt ops
+
+- name: Install required packages
+  apt:
+    name:
+      - grafana
+      - jq
+      - telegraf
+      - influxdb2
+      - influxdb2-cli
+      - wget
+    state: present
+    install_recommends: no
+  register: apt_4
+  retries: 10
+  until: apt_4 is success
+  tags: packages
+  
+### Configure influxdb2
+
+- name: Configure influxdb
+  #ignore_errors: yes # Do not fail on metrics config
+  block:
+  - name: Start and enable influxdb2 service
+    service:
+      name: influxdb
+      state: started
+      enabled: yes
+
+  - name: Setup influxdb2 user
+    shell: |
+      INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
+      [ -z "$INFLUX_BUCKET_ID" ] && influx setup --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --bucket {{ influx.bucket }} --retention 30d --token {{ influx.password }} -force || echo "Bucket found with ID ${INFLUX_BUCKET_ID}"
+
+  - name: Setup influxdb1 user
+    shell: |
+      INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
+      INFLUX_AUTH_ID=`influx v1 auth list | grep {{ influx.bucket }} | awk '{print($1)}'`
+      [ -z "$INFLUX_AUTH_ID" ] && influx v1 auth create --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --read-bucket ${INFLUX_BUCKET_ID} || echo "Auth found with ID ${INFLUX_AUTH_ID}"
+
+### Configure telegraf
+
+- name: Configure telegraf
+  #ignore_errors: yes # Do not fail on metrics config
+  block:
+  - name: Copy telegraf vars configuration
+    template:
+      src: telegraf/telegraf-default
+      dest: /etc/default/telegraf
+      owner: telegraf
+      group: telegraf
+      mode: '0640'
+
+  - name: Conf template for grafana datasource conf
+    template:
+      src: telegraf/telegraf.conf
+      dest: /etc/telegraf/telegraf.conf
+
+  - name: Add telegraf user to adm group
+    user:
+      name: telegraf
+      groups: adm
+      append: yes
+
+  - name: Set ownership and permissions on telegraf directory
+    file:
+      path: /etc/telegraf
+      owner: telegraf
+      group: telegraf
+      mode: '0750'
+      recurse: yes
+
+  - name: Set permissions on telegraf configuration file
+    file:
+      path: /etc/telegraf/telegraf.conf
+      mode: '0640'
+
+  - name: Start and enable telegraf service
+    service:
+      name: telegraf
+      state: restarted
+      enabled: yes
+
+### Configure grafana
+- name: Configure grafana
+  #ignore_errors: yes # Do not fail on metrics config
+  block:
+  - name: Conf template for grafana ini
+    template:
+      src: grafana/grafana.ini
+      dest: /etc/grafana/grafana.ini
+
+  - name: Conf template for grafana datasource conf
+    template:
+      src: grafana/datasource.yaml
+      dest: /etc/grafana/provisioning/datasources/graf_ds.yaml
+
+  - name: Conf template for grafana dashboard conf
+    template:
+      src: grafana/dashboard.yaml
+      dest: /etc/grafana/provisioning/dashboards/graf_dash.yaml
+
+  - name: Ensure grafana dashboard dir exists
+    file:
+      path: /var/lib/grafana/dashboards
+      state: directory
+
+  - name: Stage pre-baked grafana dashboard JSON model
+    template:
+      src: grafana/dashboard.json
+      dest: /var/lib/grafana/dashboards/metrics.json
+
+  - name: Start and enable grafana service
+    service:
+      name: grafana-server
+      state: restarted
+      enabled: yes

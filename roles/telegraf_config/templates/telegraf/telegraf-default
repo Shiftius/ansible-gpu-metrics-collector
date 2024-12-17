@@ -1,0 +1,5 @@
+LP_STACK_NAME="{{ userid }}-{{ hostid}}"
+AWS_REGION="{{ aws_region | default('us-west-2') }}"
+AWS_ACCESS_KEY="{{aws_timestream_access_key | default('empty-access-key') }}"
+AWS_SECRET_KEY="{{aws_timestream_secret_key | default('empty-secret-key') }}"
+AWS_TIMESTREAM_DB="{{aws_timestream_database | default('empty-database') }}"

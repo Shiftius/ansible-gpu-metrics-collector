@@ -1,0 +1,18 @@
+
+    - name: Read the authorized_keys file
+      slurp:
+        src: ~/.ssh/authorized_keys
+      register: authorized_keys_file
+
+- name: Set fact for userid
+  set_fact:
+    userid: >-
+      {{
+        (authorized_keys_file['content'] | b64decode)
+        | regex_search('^ssh-[^ ]+ [^ ]+ ([^\\n]+)', '\\1', multiline=True)
+        | default(ansible_fqdn)
+      }}
+
+- name: Set fact for hostid
+  set_fact:
+    hostid: "{{ ansible_fqdn }}"
