@@ -1,8 +1,8 @@
 
-    - name: Read the authorized_keys file
-      slurp:
-        src: ~/.ssh/authorized_keys
-      register: authorized_keys_file
+- name: Read the authorized_keys file
+  slurp:
+    src: ~/.ssh/authorized_keys
+  register: authorized_keys_file
 
 - name: Set fact for userid
   set_fact:
