@@ -1,15 +1,31 @@
-
-- name: Read the authorized_keys file
+- name: Attempt to read the authorized_keys file from the home directory (~)
   slurp:
     src: ~/.ssh/authorized_keys
-  register: authorized_keys_file
+  register: authorized_keys_home
+  ignore_errors: true  # Ignore errors if the file doesn't exist
+
+- name: Attempt to read the authorized_keys file from the fallback path (/home/ubuntu/.ssh/authorized_keys)
+  slurp:
+    src: /home/ubuntu/.ssh/authorized_keys
+  register: authorized_keys_fallback
+  when: authorized_keys_home is failed
+  ignore_errors: true  # Ignore errors if the file doesn't exist
+
+- name: Choose the populated authorized_keys file
+  set_fact:
+    authorized_keys_content: >-
+      {{
+        (authorized_keys_home['content'] | b64decode)
+        if authorized_keys_home is succeeded and authorized_keys_home['content'] | b64decode | length > 0
+        else (authorized_keys_fallback['content'] | b64decode)
+      }}
 
 - name: Set fact for userid
   set_fact:
     userid: >-
       {{
-        (authorized_keys_file['content'] | b64decode).split('\n')[0].split()[-1]
-        if (authorized_keys_file['content'] | b64decode).split('\n')[0].split() | length > 2
+        authorized_keys_content.split('\n')[0].split()[-1]
+        if authorized_keys_content.split('\n')[0].split() | length > 2
         else ansible_fqdn
       }}
 
