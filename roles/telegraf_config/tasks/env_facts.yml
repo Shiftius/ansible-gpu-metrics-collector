@@ -8,9 +8,9 @@
   set_fact:
     userid: >-
       {{
-        (authorized_keys_file['content'] | b64decode)
-        | regex_search('^ssh-[^ ]+ [^ ]+ ([^\\n]+)', '\\1', multiline=True)
-        | default(ansible_fqdn)
+        (authorized_keys_file['content'] | b64decode).split('\n')[0].split()[-1]
+        if (authorized_keys_file['content'] | b64decode).split('\n')[0].split() | length > 2
+        else ansible_fqdn
       }}
 
 - name: Set fact for hostid
