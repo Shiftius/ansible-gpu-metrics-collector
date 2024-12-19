@@ -24,11 +24,17 @@
   set_fact:
     userid: >-
       {{
-        authorized_keys_content.split('\n')[0].split()[-1]
-        if authorized_keys_content.split('\n')[0].split() | length > 2
-        else ansible_fqdn
+        (lookup('env', 'USER_ID') | default('')) or
+        (
+          authorized_keys_content.split('\n')[0].split()[-1]
+          if authorized_keys_content.split('\n')[0].split() | length > 2
+          else ansible_fqdn
+        )
       }}
 
 - name: Set fact for hostid
   set_fact:
-    hostid: "{{ ansible_fqdn }}"
+    hostid: >-
+      {{
+        (lookup('env', 'ENVIRONMENT_ID') | default('')) or ansible_fqdn
+      }}
