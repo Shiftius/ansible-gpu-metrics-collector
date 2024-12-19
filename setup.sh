@@ -20,6 +20,11 @@ sudo chmod 775 $LOG_DIR  # Allow read/write for owner and group, read for others
 # Create the log file
 touch $LOG_FILE
 chmod 664 $LOG_FILE  # Allow write for owner and group, read for others
+# Capture all script arguments to pass to Ansible as extra-vars
+EXTRA_VARS="$@"
 
-# Run the Ansible playbook with logging enabled
-ANSIBLE_LOG_PATH=$LOG_FILE ansible-playbook -c local -i 'localhost,' -b playbook.yml
+# Run the Ansible playbook with logging and extra-vars
+ANSIBLE_LOG_PATH=$LOG_FILE ansible-playbook -c local -i 'localhost,' -b playbook.yml --extra-vars "$EXTRA_VARS"
+
+# Sample call:
+# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- var1=value1 var2=value2
