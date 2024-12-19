@@ -1,31 +1,46 @@
 Role Name
 =========
 
-A brief description of the role goes here.
+Install and Configure Telegraf with outputs for local InfluxDB and remote AWS Timestream backends
 
 Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+N/A
 
 Role Variables
 --------------
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
+N/A - derived from environment variables
 
 Dependencies
 ------------
 
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
+N/A
 
 Example Playbook
 ----------------
 
 Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
 
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
+```
+---
+- name: Configure Telegraf
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    domain: "domain.com"
+    influx:
+      org: lp
+      bucket: lp
+      username: lp
+      password: LocaFluxCapacity2024
+    grafana:
+      subpath: 'metrics'
+  roles:
+    - name: telegraf_config
+```
 
 License
 -------
