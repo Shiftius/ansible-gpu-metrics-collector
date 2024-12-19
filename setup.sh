@@ -1,8 +1,12 @@
 #!/bin/bash
 
 # Install prerequisites
-sudo apt update && sudo apt install python3 python3-pip -y
+sudo apt update && sudo apt install python3 python3-pip git -y
 sudo pip install ansible
+
+cd /tmp
+git clone https://github.com/Shiftius/ansible-gpu-metrics-collector.git mc
+cd mc
 
 # Define log directory and file
 LOG_DIR="/var/log/ansible"
