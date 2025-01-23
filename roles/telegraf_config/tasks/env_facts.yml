@@ -45,3 +45,7 @@
         if (environmentID is defined and environmentID | length > 0)
         else ansible_fqdn
       }}
+
+- name: Debug hostid
+  debug:
+    msg: "Hostid: {{ hostid }}"
