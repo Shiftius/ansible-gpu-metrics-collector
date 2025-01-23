@@ -41,6 +41,7 @@
   set_fact:
     hostid: >-
       {{
-        if environmentID is defined and environmentID != '' then environmentID 
-        else (lookup('env', 'ENVIRONMENT_ID') | default('')) or ansible_fqdn
+        environmentID
+        if (environmentID is defined and environmentID | length > 0)
+        else ansible_fqdn
       }}
