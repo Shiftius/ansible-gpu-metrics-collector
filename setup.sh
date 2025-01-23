@@ -27,4 +27,4 @@ EXTRA_VARS="$@"
 ANSIBLE_LOG_PATH=$LOG_FILE ansible-playbook -c local -i 'localhost,' -b playbook.yml --extra-vars "$EXTRA_VARS"
 
 # Sample call:
-# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database=''
+# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
