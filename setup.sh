@@ -10,11 +10,11 @@ echo_info() {
 
 # Update package lists and install prerequisites
 echo_info "Updating package lists and installing prerequisites..."
-apt-get update
-apt-get install -y python3 python3-pip python3-venv git
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-venv git
 
 # Define virtual environment directory
-VENV_DIR="/opt/ansible_env"
+VENV_DIR="/tmp/ansible_env"
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
@@ -38,7 +38,7 @@ pip install ansible
 
 # Clone the Ansible repository
 REPO_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector.git"
-CLONE_DIR="/opt/mc"
+CLONE_DIR="/tmp/mc"
 
 if [ ! -d "$CLONE_DIR" ]; then
     echo_info "Cloning repository from $REPO_URL to $CLONE_DIR..."
@@ -55,20 +55,20 @@ LOG_FILE="$LOG_DIR/ansible-playbook.log"
 
 # Create the log directory with appropriate permissions
 echo_info "Setting up log directory at $LOG_DIR..."
-mkdir -p "$LOG_DIR"
-chmod 775 "$LOG_DIR"
+sudo mkdir -p "$LOG_DIR"
+sudo chmod 775 "$LOG_DIR"
 
 # Create the log file with appropriate permissions
 echo_info "Creating log file at $LOG_FILE..."
-touch "$LOG_FILE"
-chmod 664 "$LOG_FILE"
+sudo touch "$LOG_FILE"
+sudo chmod 777 "$LOG_FILE"
 
 # Capture all script arguments to pass to Ansible as extra-vars
 EXTRA_VARS="$@"
 
 # Run the Ansible playbook with logging and extra-vars
 echo_info "Running the Ansible playbook..."
-ANSIBLE_LOG_PATH="$LOG_FILE" "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "$EXTRA_VARS"
+ANSIBLE_LOG_PATH="$LOG_FILE" sudo "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "$EXTRA_VARS"
 
 # Deactivate the virtual environment
 echo_info "Deactivating the virtual environment..."
