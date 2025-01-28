@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -x
 
 # Function to display informational messages
 echo_info() {
@@ -46,7 +45,7 @@ VENV_DIR="/tmp/ansible_env"
 # Create virtual environment if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
     echo_info "Creating Python virtual environment at $VENV_DIR..."
-    python3 -m venv "$VENV_DIR"
+    python3 -m venv $VENV_DIR
 else
     echo_info "Python virtual environment already exists at $VENV_DIR."
 fi
