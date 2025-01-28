@@ -11,8 +11,8 @@ echo_info() {
 # Function to wait for apt lock to be free
 wait_for_apt_lock() {
     local lock_file="/var/lib/dpkg/lock-frontend"
-    local lock_wait_time=60  # Maximum wait time in seconds
-    local interval=5         # Interval between checks in seconds
+    local lock_wait_time=360  # Maximum wait time in seconds
+    local interval=5          # Interval between checks in seconds
     local elapsed=0
 
     echo_info "Waiting for apt lock to be released..."
