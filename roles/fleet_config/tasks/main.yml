@@ -4,7 +4,7 @@
   get_url:
     url: "{{ fleet_amd64_url }}"
     dest: "/opt/{{ fleet_pkg_amd64 }}"
-    mode: get
+    mode: "0644"
   tags: packages
   ignore_errors: true
 
