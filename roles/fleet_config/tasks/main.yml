@@ -1,0 +1,8 @@
+---
+# tasks file for fleet_config
+
+# Ensure skip errors
+
+# Pull fleet agent from git
+
+# Install
