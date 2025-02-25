@@ -1,0 +1,4 @@
+---
+# defaults file for fleet_config
+fleet_amd64_url: "https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/f2a389a0c40047587c32daafd34d407bc130075f8d29decf2c0aad5f60464043"
+fleet_pkg_amd64: "fleet-1.0.0_amd64.deb"
