@@ -14,3 +14,4 @@
       subpath: 'metrics'
   roles:
     - name: telegraf_config
+    - name: fleet_config

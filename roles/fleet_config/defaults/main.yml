@@ -1,2 +1,4 @@
 ---
 # defaults file for fleet_config
+fleet_amd64_url: "https://github.com/fleetdm/fleet/releases/download/v1.0.0/fleet-1.0.0_amd64.deb"
+fleet_pkg_amd64: "fleet-1.0.0_amd64.deb"
