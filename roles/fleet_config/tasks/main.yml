@@ -1,6 +1,5 @@
 ---
-# tasks file for fleet_config
-- name: Download file from HTTPS URL
+- name: Download pkg
   get_url:
     url: "{{ fleet_amd64_url }}"
     dest: "/opt/{{ fleet_pkg_amd64 }}"
@@ -8,7 +7,7 @@
   tags: packages
   ignore_errors: true
 
-- name: Install Fleet agent
+- name: Install pkg
   ansible.builtin.apt:
     deb: "/opt/{{ fleet_pkg_amd64 }}"
   tags: packages
