@@ -94,6 +94,8 @@ sudo chmod 664 "$LOG_FILE"
 # Optional: Change ownership to the current user to allow writing without sudo
 # sudo chown "$USER":"$USER" "$LOG_FILE"
 
+set +x  # Disable debug output to hide sensitive variables
+
 # Capture all script arguments to pass to Ansible as extra-vars
 EXTRA_VARS="$@"
 
