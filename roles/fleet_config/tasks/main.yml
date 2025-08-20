@@ -6,10 +6,12 @@
     mode: "0644"
   tags: packages
   ignore_errors: true
+  no_log: true
 
 - name: Install pkg
   ansible.builtin.apt:
     deb: "/opt/{{ fleet_pkg_amd64 }}"
   tags: packages
   ignore_errors: true
+  no_log: true
 
