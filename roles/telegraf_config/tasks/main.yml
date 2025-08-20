@@ -74,12 +74,14 @@
     shell: |
       INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
       [ -z "$INFLUX_BUCKET_ID" ] && influx setup --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --bucket {{ influx.bucket }} --retention 30d --token {{ influx.password }} -force || echo "Bucket found with ID ${INFLUX_BUCKET_ID}"
+    no_log: true  # Prevent logging of sensitive credentials
 
   - name: Setup influxdb1 user
     shell: |
       INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
       INFLUX_AUTH_ID=`influx v1 auth list | grep {{ influx.bucket }} | awk '{print($1)}'`
       [ -z "$INFLUX_AUTH_ID" ] && influx v1 auth create --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --read-bucket ${INFLUX_BUCKET_ID} || echo "Auth found with ID ${INFLUX_AUTH_ID}"
+    no_log: true  # Prevent logging of sensitive credentials
 
 ### Configure telegraf
 
@@ -93,6 +95,7 @@
       owner: telegraf
       group: telegraf
       mode: '0640'
+    no_log: true  # Contains AWS secrets
 
   - name: Conf template for grafana datasource conf
     template:

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+set +x
 
 # Function to display informational messages
 echo_info() {

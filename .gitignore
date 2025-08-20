@@ -1,1 +1,44 @@
 managed-dashboard.json
+
+# Security: Never commit sensitive files
+*.pem
+*.key
+*.crt
+*.p12
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+.vault_pass
+vault_password_file
+*.vault
+secrets/
+credentials/
+.env
+.env.*
+
+# Ansible runtime files
+*.retry
+/tmp/ansible_facts/
+/var/log/ansible/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
