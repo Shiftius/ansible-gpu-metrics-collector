@@ -4,6 +4,11 @@
 - name: Load environment facts
   include_tasks: tasks/env_facts.yml
 
+- name: Set system hostname
+  hostname:
+    name: "{{ host_prefix }}-{{ hostid }}"
+  register: hostname_result
+
 ### Pkg: influxdata prereq
 
 - name: Add InfluxData repository key
