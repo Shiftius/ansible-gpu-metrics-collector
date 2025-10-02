@@ -11,6 +11,17 @@
 
 ### Pkg: influxdata prereq
 
+- name: Remove existing InfluxData repository configurations
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/influxdata.list
+    - /etc/apt/sources.list.d/influxdb.list
+    - /etc/apt/keyrings/influxdata-apt-keyring.asc
+    - /etc/apt/keyrings/influxdata.gpg
+  ignore_errors: true
+
 - name: Add InfluxData repository key
   shell: |
     curl -s https://repos.influxdata.com/influxdata-archive_compat.key > influxdata-archive_compat.key
