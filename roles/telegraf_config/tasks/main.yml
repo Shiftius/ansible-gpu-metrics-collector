@@ -41,6 +41,18 @@
 
 ### Pkg: grafana prereq
 
+- name: Remove existing Grafana repository configurations
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/grafana.list
+    - /etc/apt/keyrings/grafana.asc
+    - /etc/apt/keyrings/grafana.key
+    - /usr/share/keyrings/grafana.key
+    - /usr/share/keyrings/grafana.asc
+  ignore_errors: true
+
 - name: Add Grafana repository key
   shell: |
     curl -s https://apt.grafana.com/gpg.key > /usr/share/keyrings/grafana.key
