@@ -19,7 +19,6 @@
         gather_subset:
           - hardware
           - processor
-          - memory
       ignore_errors: true
 
     - name: Get GPU count from lspci

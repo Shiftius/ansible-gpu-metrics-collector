@@ -1,5 +1,5 @@
 ---
-- name: Configure Telegraf
+- name: Configure Instance
   hosts: all
   become: true
   gather_facts: true
