@@ -29,6 +29,8 @@ This Ansible role gathers detailed hardware information from the target system a
   - CPU model, core count, and vCPU count
   - Total memory
   - Total GPU count and models
+  - NVIDIA driver version and CUDA versions
+  - GPU memory and compute capabilities
   - System vendor and model
 - Collects structured data without raw command outputs for easy parsing
 - Safely appends to existing JSON file (never replaces existing data)
@@ -88,6 +90,11 @@ The resulting `/etc/brev/metadata.json` file will have the following structure:
     "total_memory_mb": 65536,
     "total_gpus": 2,
     "gpu_models": "NVIDIA L4, NVIDIA L4",
+    "nvidia_driver_version": "570.195.03",
+    "cuda_toolkit_version": "12.2",
+    "cuda_runtime_version": "12.2.140",
+    "gpu_memory_total_mb": "23034,23034",
+    "gpu_compute_capabilities": "8.9,8.9",
     "system_vendor": "Google",
     "system_model": "Google Compute Engine"
   },

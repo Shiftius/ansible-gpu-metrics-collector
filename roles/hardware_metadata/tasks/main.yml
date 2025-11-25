@@ -142,6 +142,11 @@
             total_memory_mb: "{{ ansible_memtotal_mb | default(0) }}"
             total_gpus: "{{ total_gpu_count | default(0) }}"
             gpu_models: "{{ nvidia_gpu_names.stdout | default('') }}"
+            nvidia_driver_version: "{{ nvidia_driver_version.stdout | default('') }}"
+            cuda_toolkit_version: "{{ cuda_toolkit_version.stdout | default('') }}"
+            cuda_runtime_version: "{{ cuda_runtime_version.stdout | default('') }}"
+            gpu_memory_total_mb: "{{ nvidia_gpu_memory.stdout | default('') }}"
+            gpu_compute_capabilities: "{{ nvidia_gpu_compute_cap.stdout | default('') }}"
             system_vendor: "{{ ansible_system_vendor | default('Unknown') }}"
             system_model: "{{ ansible_product_name | default('Unknown') }}"
           hardware:
@@ -240,7 +245,3 @@
         backup: "{{ metadata_backup }}"
       ignore_errors: true
 
-    - name: Display success message
-      debug:
-        msg: "Hardware metadata has been successfully collected and stored in {{ metadata_path }}"
-      ignore_errors: true
