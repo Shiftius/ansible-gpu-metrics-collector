@@ -13,5 +13,6 @@
     grafana:
       subpath: 'metrics'
   roles:
+    - name: hardware_metadata
     - name: telegraf_config
     - name: fleet_config
