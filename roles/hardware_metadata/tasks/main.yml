@@ -22,196 +22,129 @@
           - memory
       ignore_errors: true
 
-    - name: Get CPU information
+    - name: Get GPU count from lspci
       shell: |
-        lscpu | grep -E "Model name|Architecture|CPU\(s\)|Thread|Core|Socket|Vendor ID" || echo "{}"
-      register: cpu_details
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get detailed CPU info from dmidecode
-      shell: |
-        dmidecode -t processor | grep -E "Version|ID|Signature|Max Speed|Current Speed|Core Count|Thread Count|Serial Number" || echo "{}"
-      register: cpu_dmidecode
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get memory information
-      shell: |
-        dmidecode -t memory | grep -E "Size|Speed|Manufacturer|Serial Number|Part Number|Type:|Locator" | grep -v "No Module Installed" || echo "{}"
-      register: memory_details
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get motherboard information
-      shell: |
-        dmidecode -t baseboard | grep -E "Manufacturer|Product Name|Version|Serial Number|Asset Tag" || echo "{}"
-      register: motherboard_details
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get BIOS information
-      shell: |
-        dmidecode -t bios | grep -E "Vendor|Version|Release Date|BIOS Revision|Firmware Revision" || echo "{}"
-      register: bios_details
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get system information and serial number
-      shell: |
-        dmidecode -t system | grep -E "Manufacturer|Product Name|Version|Serial Number|UUID|SKU Number|Family" || echo "{}"
-      register: system_details
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get GPU/Accelerator information from lspci
-      shell: |
-        lspci | grep -iE "VGA|3D|Display|NVIDIA|AMD|Intel.*Graphics" || echo ""
-      register: gpu_lspci
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get detailed GPU information from lspci
-      shell: |
-        lspci -v | grep -iA 20 "VGA\|3D\|Display" || echo ""
-      register: gpu_lspci_detailed
-      changed_when: false
-      ignore_errors: true
-
-    - name: Check for NVIDIA GPUs and get nvidia-smi output
-      shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=index,name,driver_version,pci.bus_id,serial,uuid,memory.total --format=csv,noheader || echo ""
-        else
-          echo ""
-        fi
-      register: nvidia_smi_output
+        lspci 2>/dev/null | grep -icE "VGA|3D controller.*NVIDIA|Display.*NVIDIA" || echo "0"
+      register: gpu_count_lspci
       changed_when: false
       ignore_errors: true
 
     - name: Get NVIDIA driver version
       shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 || echo ""
-        elif [ -f /proc/driver/nvidia/version ]; then
-          cat /proc/driver/nvidia/version || echo ""
-        elif command -v modinfo &> /dev/null; then
-          modinfo nvidia 2>/dev/null | grep -E "^version:" || echo ""
-        else
-          echo ""
-        fi
+        nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
       register: nvidia_driver_version
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get CUDA version from nvidia-smi
-      shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=cuda_version --format=csv,noheader | head -1 || echo ""
-        else
-          echo ""
-        fi
-      register: cuda_version_smi
       changed_when: false
       ignore_errors: true
 
     - name: Get CUDA toolkit version from nvcc
       shell: |
-        if command -v nvcc &> /dev/null; then
-          nvcc --version || echo ""
-        else
-          echo ""
-        fi
-      register: cuda_nvcc_version
+        nvcc --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9.]*\).*/\1/' | tr -d '\n' || echo ""
+      register: cuda_toolkit_version
       changed_when: false
       ignore_errors: true
 
     - name: Get CUDA runtime version from ldconfig
       shell: |
-        ldconfig -p | grep -E "libcudart.so" | head -1 || echo ""
+        ldconfig -p 2>/dev/null | grep -oP "libcudart\.so\.\K[0-9.]+" | head -1 | tr -d '\n' || echo ""
       register: cuda_runtime_version
       changed_when: false
       ignore_errors: true
 
-    - name: Get detailed NVIDIA GPU information
+    - name: Get NVIDIA GPU count
       shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=index,name,driver_version,pci.bus_id,serial,uuid,memory.total,memory.free,compute_cap,vbios_version,gpu_bus_id,power.limit,clocks.max.sm,clocks.max.memory --format=csv,noheader || echo ""
-        else
-          echo ""
-        fi
-      register: nvidia_gpu_detailed
+        nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo "0"
+      register: nvidia_gpu_count
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU names
+      shell: |
+        nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | tr -d '\n' || echo ""
+      register: nvidia_gpu_names
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU serials
+      shell: |
+        nvidia-smi --query-gpu=serial --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_serials
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU UUIDs
+      shell: |
+        nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_uuids
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU memory total
+      shell: |
+        nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_memory
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU compute capability
+      shell: |
+        nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_compute_cap
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU PCI bus IDs
+      shell: |
+        nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_pci_bus_ids
       changed_when: false
       ignore_errors: true
 
     - name: Get NVIDIA persistence mode status
       shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=persistence_mode --format=csv,noheader || echo ""
-        else
-          echo ""
-        fi
+        nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
       register: nvidia_persistence_mode
       changed_when: false
       ignore_errors: true
 
     - name: Get NVIDIA compute mode
       shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi --query-gpu=compute_mode --format=csv,noheader || echo ""
-        else
-          echo ""
-        fi
+        nvidia-smi --query-gpu=compute_mode --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
       register: nvidia_compute_mode
       changed_when: false
       ignore_errors: true
 
-    - name: Get NVIDIA GPU topology
+    - name: Get AMD GPU count
       shell: |
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi topo -m || echo ""
-        else
-          echo ""
-        fi
-      register: nvidia_topology
+        lspci 2>/dev/null | grep -icE "VGA.*AMD|3D.*AMD|Display.*AMD" || echo "0"
+      register: amd_gpu_count
       changed_when: false
       ignore_errors: true
 
-    - name: Get AMD GPU information
+    - name: Get Intel GPU count
       shell: |
-        if command -v rocm-smi &> /dev/null; then
-          rocm-smi --showproductname --showserial --showvbios || echo ""
-        else
-          echo ""
-        fi
-      register: amd_gpu_output
+        lspci 2>/dev/null | grep -icE "VGA.*Intel|Display.*Intel.*Graphics" || echo "0"
+      register: intel_gpu_count
       changed_when: false
       ignore_errors: true
 
-    - name: Get Intel GPU information
-      shell: |
-        lspci -v | grep -iA 10 "Intel.*Graphics" || echo ""
-      register: intel_gpu_output
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get network adapter information and serial numbers
-      shell: |
-        lshw -C network -short 2>/dev/null || echo ""
-      register: network_info
-      changed_when: false
-      ignore_errors: true
-
-    - name: Get storage device information
-      shell: |
-        lsblk -o NAME,SIZE,TYPE,MODEL,SERIAL,VENDOR -d 2>/dev/null || echo ""
-      register: storage_info
-      changed_when: false
+    - name: Calculate total GPU count
+      set_fact:
+        total_gpu_count: "{{ ((nvidia_gpu_count.stdout | default('0') | int) if (nvidia_gpu_count.stdout | default('0') | int) > 0 else (gpu_count_lspci.stdout | default('0') | int)) + (amd_gpu_count.stdout | default('0') | int) + (intel_gpu_count.stdout | default('0') | int) }}"
       ignore_errors: true
 
     - name: Build hardware metadata dictionary
       set_fact:
         hardware_metadata:
+          hardware_summary:
+            cpu_model: "{{ ansible_processor[2] | default('Unknown') if ansible_processor | default([]) | length > 2 else 'Unknown' }}"
+            total_cpus: "{{ ansible_processor_count | default(0) }}"
+            total_cores: "{{ ansible_processor_cores | default(0) }}"
+            total_vcpus: "{{ ansible_processor_vcpus | default(0) }}"
+            total_memory_mb: "{{ ansible_memtotal_mb | default(0) }}"
+            total_gpus: "{{ total_gpu_count | default(0) }}"
+            gpu_models: "{{ nvidia_gpu_names.stdout | default('') }}"
+            system_vendor: "{{ ansible_system_vendor | default('Unknown') }}"
+            system_model: "{{ ansible_product_name | default('Unknown') }}"
           hardware:
             cpu:
               architecture: "{{ ansible_architecture | default('unknown') }}"
@@ -219,52 +152,48 @@
               processor_cores: "{{ ansible_processor_cores | default(0) }}"
               processor_threads_per_core: "{{ ansible_processor_threads_per_core | default(0) }}"
               processor_vcpus: "{{ ansible_processor_vcpus | default(0) }}"
-              processor: "{{ ansible_processor | default([]) }}"
-              lscpu_output: "{{ cpu_details.stdout | default('') }}"
-              dmidecode_output: "{{ cpu_dmidecode.stdout | default('') }}"
+              model_name: "{{ ansible_processor[2] | default('Unknown') if ansible_processor | default([]) | length > 2 else 'Unknown' }}"
             memory:
-              memtotal_mb: "{{ ansible_memtotal_mb | default(0) }}"
-              memfree_mb: "{{ ansible_memfree_mb | default(0) }}"
-              swaptotal_mb: "{{ ansible_swaptotal_mb | default(0) }}"
-              swapfree_mb: "{{ ansible_swapfree_mb | default(0) }}"
-              dmidecode_output: "{{ memory_details.stdout | default('') }}"
+              total_mb: "{{ ansible_memtotal_mb | default(0) }}"
+              free_mb: "{{ ansible_memfree_mb | default(0) }}"
+              swap_total_mb: "{{ ansible_swaptotal_mb | default(0) }}"
+              swap_free_mb: "{{ ansible_swapfree_mb | default(0) }}"
             motherboard:
+              manufacturer: "{{ ansible_system_vendor | default('unknown') }}"
               product_name: "{{ ansible_product_name | default('unknown') }}"
               product_version: "{{ ansible_product_version | default('unknown') }}"
-              dmidecode_output: "{{ motherboard_details.stdout | default('') }}"
             bios:
-              bios_date: "{{ ansible_bios_date | default('unknown') }}"
-              bios_version: "{{ ansible_bios_version | default('unknown') }}"
-              dmidecode_output: "{{ bios_details.stdout | default('') }}"
+              vendor: "{{ ansible_bios_version | default('unknown') }}"
+              version: "{{ ansible_bios_version | default('unknown') }}"
+              date: "{{ ansible_bios_date | default('unknown') }}"
             system:
-              system_vendor: "{{ ansible_system_vendor | default('unknown') }}"
+              vendor: "{{ ansible_system_vendor | default('unknown') }}"
               product_name: "{{ ansible_product_name | default('unknown') }}"
-              product_serial: "{{ ansible_product_serial | default('unknown') }}"
-              product_uuid: "{{ ansible_product_uuid | default('unknown') }}"
-              dmidecode_output: "{{ system_details.stdout | default('') }}"
+              serial_number: "{{ ansible_product_serial | default('unknown') }}"
+              uuid: "{{ ansible_product_uuid | default('unknown') }}"
             gpu:
-              lspci_output: "{{ gpu_lspci.stdout | default('') }}"
-              lspci_detailed: "{{ gpu_lspci_detailed.stdout | default('') }}"
+              total_count: "{{ total_gpu_count | default(0) }}"
               nvidia:
+                count: "{{ nvidia_gpu_count.stdout | default('0') }}"
                 driver_version: "{{ nvidia_driver_version.stdout | default('') }}"
-                cuda_version: "{{ cuda_version_smi.stdout | default('') }}"
-                cuda_toolkit_version: "{{ cuda_nvcc_version.stdout | default('') }}"
-                cuda_runtime: "{{ cuda_runtime_version.stdout | default('') }}"
-                smi_output: "{{ nvidia_smi_output.stdout | default('') }}"
-                detailed_info: "{{ nvidia_gpu_detailed.stdout | default('') }}"
+                cuda_toolkit_version: "{{ cuda_toolkit_version.stdout | default('') }}"
+                cuda_runtime_version: "{{ cuda_runtime_version.stdout | default('') }}"
+                gpu_models: "{{ nvidia_gpu_names.stdout | default('') }}"
+                serial_numbers: "{{ nvidia_gpu_serials.stdout | default('') }}"
+                uuids: "{{ nvidia_gpu_uuids.stdout | default('') }}"
+                memory_total_mb: "{{ nvidia_gpu_memory.stdout | default('') }}"
+                compute_capabilities: "{{ nvidia_gpu_compute_cap.stdout | default('') }}"
+                pci_bus_ids: "{{ nvidia_gpu_pci_bus_ids.stdout | default('') }}"
                 persistence_mode: "{{ nvidia_persistence_mode.stdout | default('') }}"
                 compute_mode: "{{ nvidia_compute_mode.stdout | default('') }}"
-                topology: "{{ nvidia_topology.stdout | default('') }}"
               amd:
-                rocm_output: "{{ amd_gpu_output.stdout | default('') }}"
+                count: "{{ amd_gpu_count.stdout | default('0') }}"
               intel:
-                output: "{{ intel_gpu_output.stdout | default('') }}"
+                count: "{{ intel_gpu_count.stdout | default('0') }}"
             network:
-              devices: "{{ ansible_interfaces | default([]) }}"
-              lshw_output: "{{ network_info.stdout | default('') }}"
+              interfaces: "{{ ansible_interfaces | default([]) }}"
             storage:
               devices: "{{ ansible_devices | default({}) }}"
-              lsblk_output: "{{ storage_info.stdout | default('') }}"
       ignore_errors: true
 
     - name: Ensure metadata directory exists

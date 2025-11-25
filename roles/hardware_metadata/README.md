@@ -25,7 +25,13 @@ This Ansible role gathers detailed hardware information from the target system a
   - Network adapter information
   - Storage device information
 
-- Safely appends to existing JSON file
+- Provides a clean `hardware_summary` section with key highlights:
+  - CPU model, core count, and vCPU count
+  - Total memory
+  - Total GPU count and models
+  - System vendor and model
+- Collects structured data without raw command outputs for easy parsing
+- Safely appends to existing JSON file (never replaces existing data)
 - Creates `/etc/brev` directory if it doesn't exist
 - Creates backup before modifying existing metadata
 - All tasks tolerate failures (never fails the playbook)
@@ -74,6 +80,17 @@ The resulting `/etc/brev/metadata.json` file will have the following structure:
 
 ```json
 {
+  "hardware_summary": {
+    "cpu_model": "Intel(R) Xeon(R) CPU @ 2.20GHz",
+    "total_cpus": 1,
+    "total_cores": 8,
+    "total_vcpus": 16,
+    "total_memory_mb": 65536,
+    "total_gpus": 2,
+    "gpu_models": "NVIDIA L4, NVIDIA L4",
+    "system_vendor": "Google",
+    "system_model": "Google Compute Engine"
+  },
   "hardware": {
     "cpu": {
       "architecture": "x86_64",
@@ -81,59 +98,58 @@ The resulting `/etc/brev/metadata.json` file will have the following structure:
       "processor_cores": 8,
       "processor_threads_per_core": 2,
       "processor_vcpus": 16,
-      "lscpu_output": "...",
-      "dmidecode_output": "..."
+      "model_name": "Intel(R) Xeon(R) CPU @ 2.20GHz"
     },
     "memory": {
-      "memtotal_mb": 65536,
-      "memfree_mb": 32768,
-      "dmidecode_output": "..."
+      "total_mb": 65536,
+      "free_mb": 32768,
+      "swap_total_mb": 2048,
+      "swap_free_mb": 2048
     },
     "motherboard": {
-      "product_name": "...",
-      "product_version": "...",
-      "dmidecode_output": "..."
+      "manufacturer": "Google",
+      "product_name": "Google Compute Engine",
+      "product_version": "NA"
     },
     "bios": {
-      "bios_date": "...",
-      "bios_version": "...",
-      "dmidecode_output": "..."
+      "vendor": "Google",
+      "version": "Google",
+      "date": "10/24/2025"
     },
     "system": {
-      "system_vendor": "...",
-      "product_name": "...",
-      "product_serial": "...",
-      "product_uuid": "...",
-      "dmidecode_output": "..."
+      "vendor": "Google",
+      "product_name": "Google Compute Engine",
+      "serial_number": "GoogleCloud-...",
+      "uuid": "2d2e5750-dbd0-6415-..."
     },
     "gpu": {
-      "lspci_output": "...",
-      "lspci_detailed": "...",
+      "total_count": 2,
       "nvidia": {
-        "driver_version": "535.183.01",
-        "cuda_version": "12.2",
-        "cuda_toolkit_version": "release 12.2, V12.2.140",
-        "cuda_runtime": "libcudart.so.12.2.140",
-        "smi_output": "0, Tesla V100-SXM2-32GB, 535.183.01, 00000000:00:1E.0, 0324817063841, GPU-d0a321a5-..., 32768 MiB",
-        "detailed_info": "0, Tesla V100-SXM2-32GB, 535.183.01, 00000000:00:1E.0, 0324817063841, GPU-d0a321a5-..., 32768 MiB, 31234 MiB, 7.0, 86.00.46.00.03, 00000000:00:1E.0, 300.00 W, 1530 MHz, 877 MHz",
+        "count": "2",
+        "driver_version": "570.195.03",
+        "cuda_toolkit_version": "12.2",
+        "cuda_runtime_version": "12.2.140",
+        "gpu_models": "NVIDIA L4, NVIDIA L4",
+        "serial_numbers": "1322723003395,1322723003396",
+        "uuids": "GPU-65ae4220-...,GPU-65ae4221-...",
+        "memory_total_mb": "23034,23034",
+        "compute_capabilities": "8.9,8.9",
+        "pci_bus_ids": "00000000:00:03.0,00000000:00:04.0",
         "persistence_mode": "Enabled",
-        "compute_mode": "Default",
-        "topology": "GPU0   GPU1   CPU Affinity   NUMA Affinity..."
+        "compute_mode": "Default"
       },
       "amd": {
-        "rocm_output": "..."
+        "count": "0"
       },
       "intel": {
-        "output": "..."
+        "count": "0"
       }
     },
     "network": {
-      "devices": [...],
-      "lshw_output": "..."
+      "interfaces": ["lo", "ens4", "docker0"]
     },
     "storage": {
-      "devices": {...},
-      "lsblk_output": "..."
+      "devices": {...}
     }
   }
 }
