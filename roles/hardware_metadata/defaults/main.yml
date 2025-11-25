@@ -1,0 +1,8 @@
+---
+# defaults file for hardware_metadata
+
+# Path where metadata will be stored
+metadata_path: /etc/brev/metadata.json
+
+# Whether to create backup before updating metadata
+metadata_backup: yes

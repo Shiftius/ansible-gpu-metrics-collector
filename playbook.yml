@@ -1,5 +1,5 @@
 ---
-- name: Configure Telegraf
+- name: Configure Instance
   hosts: all
   become: true
   gather_facts: true
@@ -13,5 +13,6 @@
     grafana:
       subpath: 'metrics'
   roles:
+    - name: hardware_metadata
     - name: telegraf_config
     - name: fleet_config

@@ -1,0 +1,25 @@
+---
+galaxy_info:
+  author: NV
+  description: Collects hardware metadata and stores it in /etc/provider/metadata.json
+  company: LP
+
+  license: MIT
+
+  min_ansible_version: 2.9
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+
+  galaxy_tags:
+    - hardware
+    - metadata
+    - system
+    - inventory
+
+dependencies: []

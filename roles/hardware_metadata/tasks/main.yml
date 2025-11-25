@@ -1,0 +1,247 @@
+---
+# tasks file for hardware_metadata
+
+- name: Gather hardware metadata
+  ignore_errors: true
+  block:
+    - name: Ensure required packages are installed
+      apt:
+        name:
+          - dmidecode
+          - pciutils
+          - lshw
+        state: present
+        update_cache: yes
+      ignore_errors: true
+
+    - name: Gather system facts
+      setup:
+        gather_subset:
+          - hardware
+          - processor
+      ignore_errors: true
+
+    - name: Get GPU count from lspci
+      shell: |
+        lspci 2>/dev/null | grep -icE "VGA|3D controller.*NVIDIA|Display.*NVIDIA" || echo "0"
+      register: gpu_count_lspci
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA driver version
+      shell: |
+        nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
+      register: nvidia_driver_version
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get CUDA toolkit version from nvcc
+      shell: |
+        nvcc --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9.]*\).*/\1/' | tr -d '\n' || echo ""
+      register: cuda_toolkit_version
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get CUDA runtime version from ldconfig
+      shell: |
+        ldconfig -p 2>/dev/null | grep -oP "libcudart\.so\.\K[0-9.]+" | head -1 | tr -d '\n' || echo ""
+      register: cuda_runtime_version
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU count
+      shell: |
+        nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo "0"
+      register: nvidia_gpu_count
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU names
+      shell: |
+        nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | tr -d '\n' || echo ""
+      register: nvidia_gpu_names
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU serials
+      shell: |
+        nvidia-smi --query-gpu=serial --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_serials
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU UUIDs
+      shell: |
+        nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_uuids
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU memory total
+      shell: |
+        nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_memory
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU compute capability
+      shell: |
+        nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_compute_cap
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA GPU PCI bus IDs
+      shell: |
+        nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo ""
+      register: nvidia_gpu_pci_bus_ids
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA persistence mode status
+      shell: |
+        nvidia-smi --query-gpu=persistence_mode --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
+      register: nvidia_persistence_mode
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get NVIDIA compute mode
+      shell: |
+        nvidia-smi --query-gpu=compute_mode --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo ""
+      register: nvidia_compute_mode
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get AMD GPU count
+      shell: |
+        lspci 2>/dev/null | grep -icE "VGA.*AMD|3D.*AMD|Display.*AMD" || echo "0"
+      register: amd_gpu_count
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Intel GPU count
+      shell: |
+        lspci 2>/dev/null | grep -icE "VGA.*Intel|Display.*Intel.*Graphics" || echo "0"
+      register: intel_gpu_count
+      changed_when: false
+      ignore_errors: true
+
+    - name: Calculate total GPU count
+      set_fact:
+        total_gpu_count: "{{ ((nvidia_gpu_count.stdout | default('0') | int) if (nvidia_gpu_count.stdout | default('0') | int) > 0 else (gpu_count_lspci.stdout | default('0') | int)) + (amd_gpu_count.stdout | default('0') | int) + (intel_gpu_count.stdout | default('0') | int) }}"
+      ignore_errors: true
+
+    - name: Build hardware metadata dictionary
+      set_fact:
+        hardware_metadata:
+          hardware_summary:
+            cpu_model: "{{ ansible_processor[2] | default('Unknown') if ansible_processor | default([]) | length > 2 else 'Unknown' }}"
+            total_cpus: "{{ ansible_processor_count | default(0) }}"
+            total_cores: "{{ ansible_processor_cores | default(0) }}"
+            total_vcpus: "{{ ansible_processor_vcpus | default(0) }}"
+            total_memory_mb: "{{ ansible_memtotal_mb | default(0) }}"
+            total_gpus: "{{ total_gpu_count | default(0) }}"
+            gpu_models: "{{ nvidia_gpu_names.stdout | default('') }}"
+            nvidia_driver_version: "{{ nvidia_driver_version.stdout | default('') }}"
+            cuda_toolkit_version: "{{ cuda_toolkit_version.stdout | default('') }}"
+            cuda_runtime_version: "{{ cuda_runtime_version.stdout | default('') }}"
+            gpu_memory_total_mb: "{{ nvidia_gpu_memory.stdout | default('') }}"
+            gpu_compute_capabilities: "{{ nvidia_gpu_compute_cap.stdout | default('') }}"
+            system_vendor: "{{ ansible_system_vendor | default('Unknown') }}"
+            system_model: "{{ ansible_product_name | default('Unknown') }}"
+          hardware:
+            cpu:
+              architecture: "{{ ansible_architecture | default('unknown') }}"
+              processor_count: "{{ ansible_processor_count | default(0) }}"
+              processor_cores: "{{ ansible_processor_cores | default(0) }}"
+              processor_threads_per_core: "{{ ansible_processor_threads_per_core | default(0) }}"
+              processor_vcpus: "{{ ansible_processor_vcpus | default(0) }}"
+              model_name: "{{ ansible_processor[2] | default('Unknown') if ansible_processor | default([]) | length > 2 else 'Unknown' }}"
+            memory:
+              total_mb: "{{ ansible_memtotal_mb | default(0) }}"
+              free_mb: "{{ ansible_memfree_mb | default(0) }}"
+              swap_total_mb: "{{ ansible_swaptotal_mb | default(0) }}"
+              swap_free_mb: "{{ ansible_swapfree_mb | default(0) }}"
+            motherboard:
+              manufacturer: "{{ ansible_system_vendor | default('unknown') }}"
+              product_name: "{{ ansible_product_name | default('unknown') }}"
+              product_version: "{{ ansible_product_version | default('unknown') }}"
+            bios:
+              vendor: "{{ ansible_bios_version | default('unknown') }}"
+              version: "{{ ansible_bios_version | default('unknown') }}"
+              date: "{{ ansible_bios_date | default('unknown') }}"
+            system:
+              vendor: "{{ ansible_system_vendor | default('unknown') }}"
+              product_name: "{{ ansible_product_name | default('unknown') }}"
+              serial_number: "{{ ansible_product_serial | default('unknown') }}"
+              uuid: "{{ ansible_product_uuid | default('unknown') }}"
+            gpu:
+              total_count: "{{ total_gpu_count | default(0) }}"
+              nvidia:
+                count: "{{ nvidia_gpu_count.stdout | default('0') }}"
+                driver_version: "{{ nvidia_driver_version.stdout | default('') }}"
+                cuda_toolkit_version: "{{ cuda_toolkit_version.stdout | default('') }}"
+                cuda_runtime_version: "{{ cuda_runtime_version.stdout | default('') }}"
+                gpu_models: "{{ nvidia_gpu_names.stdout | default('') }}"
+                serial_numbers: "{{ nvidia_gpu_serials.stdout | default('') }}"
+                uuids: "{{ nvidia_gpu_uuids.stdout | default('') }}"
+                memory_total_mb: "{{ nvidia_gpu_memory.stdout | default('') }}"
+                compute_capabilities: "{{ nvidia_gpu_compute_cap.stdout | default('') }}"
+                pci_bus_ids: "{{ nvidia_gpu_pci_bus_ids.stdout | default('') }}"
+                persistence_mode: "{{ nvidia_persistence_mode.stdout | default('') }}"
+                compute_mode: "{{ nvidia_compute_mode.stdout | default('') }}"
+              amd:
+                count: "{{ amd_gpu_count.stdout | default('0') }}"
+              intel:
+                count: "{{ intel_gpu_count.stdout | default('0') }}"
+            network:
+              interfaces: "{{ ansible_interfaces | default([]) }}"
+            storage:
+              devices: "{{ ansible_devices | default({}) }}"
+      ignore_errors: true
+
+    - name: Ensure metadata directory exists
+      file:
+        path: "{{ metadata_path | dirname }}"
+        state: directory
+        mode: '0755'
+      ignore_errors: true
+
+    - name: Check if metadata.json exists
+      stat:
+        path: "{{ metadata_path }}"
+      register: metadata_file
+      ignore_errors: true
+
+    - name: Read existing metadata.json if it exists
+      slurp:
+        path: "{{ metadata_path }}"
+      register: existing_metadata
+      when: metadata_file.stat.exists
+      ignore_errors: true
+
+    - name: Parse existing metadata
+      set_fact:
+        existing_metadata_dict: "{{ existing_metadata.content | b64decode | from_json }}"
+      when: metadata_file.stat.exists and existing_metadata.content is defined
+      ignore_errors: true
+
+    - name: Initialize empty metadata if file doesn't exist
+      set_fact:
+        existing_metadata_dict: {}
+      when: not metadata_file.stat.exists or existing_metadata.content is not defined
+      ignore_errors: true
+
+    - name: Merge hardware metadata with existing metadata
+      set_fact:
+        merged_metadata: "{{ existing_metadata_dict | combine(hardware_metadata, recursive=True) }}"
+      ignore_errors: true
+
+    - name: Write merged metadata to metadata file
+      copy:
+        content: "{{ merged_metadata | to_nice_json }}"
+        dest: "{{ metadata_path }}"
+        mode: '0644'
+        backup: "{{ metadata_backup }}"
+      ignore_errors: true
+
