@@ -96,12 +96,27 @@ sudo chmod 664 "$LOG_FILE"
 
 set +x  # Disable debug output to hide sensitive variables
 
-# Capture all script arguments to pass to Ansible as extra-vars
-EXTRA_VARS="$@"
+# Parse optional CLI flags while preserving existing extra-var passthrough behavior.
+SKIP_HOSTNAME_CONF=false
+EXTRA_VARS_ARGS=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --skip-hostname-conf)
+            SKIP_HOSTNAME_CONF=true
+            ;;
+        *)
+            EXTRA_VARS_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+# Capture script arguments to pass to Ansible as extra-vars.
+EXTRA_VARS_ARGS+=("skip_hostname_conf=$SKIP_HOSTNAME_CONF")
 
 # Run the Ansible playbook with logging and extra-vars
 echo_info "Running the Ansible playbook..."
-ANSIBLE_LOG_PATH="$LOG_FILE" "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "$EXTRA_VARS"
+ANSIBLE_LOG_PATH="$LOG_FILE" "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "${EXTRA_VARS_ARGS[*]}"
 
 # Deactivate the virtual environment
 echo_info "Deactivating the virtual environment..."
@@ -111,3 +126,4 @@ echo_info "Ansible playbook execution completed successfully."
 
 # Sample call:
 # curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
+# Add --skip-hostname-conf to preserve the current hostname.

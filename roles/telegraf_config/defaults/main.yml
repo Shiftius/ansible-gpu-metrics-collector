@@ -1,3 +1,4 @@
 ---
 # defaults file for telegraf_config
 host_prefix: "brev"
+skip_hostname_conf: false
