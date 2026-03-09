@@ -52,6 +52,8 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
   bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
 ```
 
+To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
+
 ### Security Protections
 
 The scripts include multiple layers of security:

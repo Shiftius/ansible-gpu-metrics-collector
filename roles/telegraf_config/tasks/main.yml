@@ -8,6 +8,7 @@
   hostname:
     name: "{{ host_prefix }}-{{ hostid }}"
   register: hostname_result
+  when: not skip_hostname_conf | bool
 
 ### Pkg: influxdata prereq
 
