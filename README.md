@@ -23,6 +23,27 @@ This playbook handles sensitive AWS credentials and database passwords. The foll
 
 ### Running Securely
 
+#### Fast Path: Raw Shell Installer
+For fresh instances where startup time matters, use the flattened raw shell installer. This leaves the Ansible playbook and roles in place, but skips the Python virtualenv and Ansible install.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup-raw.sh | \
+  sudo bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+```
+
+To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
+
+The raw installer also accepts environment variables, which keeps secrets out of the process arguments:
+
+```bash
+export AWS_TIMESTREAM_ACCESS_KEY="your-key"
+export AWS_TIMESTREAM_SECRET_KEY="your-secret"
+export AWS_TIMESTREAM_DATABASE="your-db"
+export ENVIRONMENT_ID="your-environment-id"
+
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup-raw.sh | sudo -E bash
+```
+
 #### Method 1: Interactive Secure Input (RECOMMENDED)
 ```bash
 # Use the secure wrapper script for interactive credential input
