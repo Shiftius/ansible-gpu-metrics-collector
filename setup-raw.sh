@@ -119,6 +119,21 @@ parse_args() {
             --skip-hostname-conf)
                 SKIP_HOSTNAME_CONF=true
                 ;;
+            skip_hostname_conf=*)
+                value="${arg#*=}"
+                case "$value" in
+                    true|TRUE|True|yes|YES|Yes|1)
+                        SKIP_HOSTNAME_CONF=true
+                        ;;
+                    *)
+                        SKIP_HOSTNAME_CONF=false
+                        ;;
+                esac
+                ;;
+            asset_base_url=*|ASSET_BASE_URL=*)
+                value="${arg#*=}"
+                ASSET_BASE_URL="$value"
+                ;;
             aws_region=*|AWS_REGION=*)
                 value="${arg#*=}"
                 AWS_REGION_VALUE="$value"
@@ -142,6 +157,34 @@ parse_args() {
             domain=*|DOMAIN=*)
                 value="${arg#*=}"
                 DOMAIN_VALUE="$value"
+                ;;
+            grafana.subpath=*|grafana_subpath=*|GRAFANA_SUBPATH=*)
+                value="${arg#*=}"
+                GRAFANA_SUBPATH="$value"
+                ;;
+            host_prefix=*|HOST_PREFIX=*)
+                value="${arg#*=}"
+                HOST_PREFIX="$value"
+                ;;
+            influx.bucket=*|influx_bucket=*|INFLUX_BUCKET=*)
+                value="${arg#*=}"
+                INFLUX_BUCKET="$value"
+                ;;
+            influx.org=*|influx_org=*|INFLUX_ORG=*)
+                value="${arg#*=}"
+                INFLUX_ORG="$value"
+                ;;
+            influx.password=*|influx_password=*|INFLUX_PASSWORD=*)
+                value="${arg#*=}"
+                INFLUX_PASSWORD="$value"
+                ;;
+            influx.username=*|influx_username=*|INFLUX_USERNAME=*)
+                value="${arg#*=}"
+                INFLUX_USERNAME="$value"
+                ;;
+            metadata_path=*|METADATA_PATH=*)
+                value="${arg#*=}"
+                METADATA_PATH="$value"
                 ;;
             fleet_amd64_url=*|FLEET_AMD64_URL=*)
                 value="${arg#*=}"

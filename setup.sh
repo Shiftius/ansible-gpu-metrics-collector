@@ -1,128 +1,92 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
+if [[ ${-} == *x* ]]; then
+    echo "[ERROR] Do not run this script with shell tracing enabled; it can expose credentials." >&2
+    exit 1
+fi
+
+set -Eeuo pipefail
 set +x
 
-# Function to display informational messages
+export HISTFILE=/dev/null
+
+readonly DEFAULT_RAW_INSTALLER_URL="https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/${INSTALLER_REF:-main}/setup-raw.sh"
+
+RAW_INSTALLER_URL="${RAW_INSTALLER_URL:-$DEFAULT_RAW_INSTALLER_URL}"
+
 echo_info() {
-    echo -e "\033[1;34m[INFO]\033[0m $1"
+    printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
 }
 
-# Function to wait for apt lock to be free
-wait_for_apt_lock() {
-    local lock_file="/var/lib/dpkg/lock-frontend"
-    local lock_wait_time=360  # Maximum wait time in seconds
-    local interval=5          # Interval between checks in seconds
-    local elapsed=0
-
-    echo_info "Waiting for apt lock to be released..."
-
-    while sudo fuser "$lock_file" >/dev/null 2>&1; do
-        if [ "$elapsed" -ge "$lock_wait_time" ]; then
-            echo -e "\033[1;31m[ERROR]\033[0m Timeout waiting for apt lock to be released."
-            exit 1
-        fi
-        echo_info "Apt lock is currently held by another process. Waiting..."
-        sleep "$interval"
-        elapsed=$((elapsed + interval))
-    done
-
-    echo_info "Apt lock is now free. Proceeding with package installation."
+echo_error() {
+    printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2
 }
 
-# Update package lists and install prerequisites
-echo_info "Updating package lists and installing prerequisites..."
+run_as_root() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        bash "$@"
+    else
+        sudo -E bash "$@"
+    fi
+}
 
-# Wait for any existing apt processes to finish
-wait_for_apt_lock
+local_raw_installer() {
+    local source_path="${BASH_SOURCE[0]:-}"
+    local script_dir
 
-# Proceed with package installation
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv git
+    if [[ -z "$source_path" || "$source_path" == "bash" || "$source_path" == */bash ]]; then
+        return 1
+    fi
 
-# Define virtual environment directory
-VENV_DIR="/tmp/ansible_env"
+    script_dir="$(cd "$(dirname "$source_path")" && pwd)"
+    if [[ -f "${script_dir}/setup-raw.sh" ]]; then
+        printf '%s\n' "${script_dir}/setup-raw.sh"
+        return 0
+    fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "$VENV_DIR" ]; then
-    echo_info "Creating Python virtual environment at $VENV_DIR..."
-    python3 -m venv $VENV_DIR
-else
-    echo_info "Python virtual environment already exists at $VENV_DIR."
-fi
+    return 1
+}
 
-# Activate the virtual environment
-echo_info "Activating the virtual environment..."
-source "$VENV_DIR/bin/activate"
+download_raw_installer() {
+    local dest="$1"
 
-# Upgrade pip within the virtual environment
-echo_info "Upgrading pip..."
-pip install --upgrade pip
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$RAW_INSTALLER_URL" -o "$dest"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$dest" "$RAW_INSTALLER_URL"
+    else
+        echo_error "Install curl or wget, or run setup.sh from a checkout that also contains setup-raw.sh."
+        exit 1
+    fi
 
-# Install Ansible within the virtual environment
-echo_info "Installing Ansible in the virtual environment..."
-pip install ansible
+    chmod 0755 "$dest"
+}
 
-# Clone the Ansible repository
-REPO_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector.git"
-CLONE_DIR="/tmp/mc"
+main() {
+    local raw_installer=""
+    local downloaded_installer=""
 
-if [ ! -d "$CLONE_DIR" ]; then
-    echo_info "Cloning repository from $REPO_URL to $CLONE_DIR..."
-    git clone "$REPO_URL" "$CLONE_DIR"
-else
-    echo_info "Repository already cloned at $CLONE_DIR."
-fi
+    echo_info "Delegating setup to the raw shell installer..."
 
-cd "$CLONE_DIR"
+    if raw_installer="$(local_raw_installer)"; then
+        echo_info "Using local setup-raw.sh."
+    else
+        downloaded_installer="$(mktemp)"
+        echo_info "Downloading setup-raw.sh from ${RAW_INSTALLER_URL}..."
+        download_raw_installer "$downloaded_installer"
+        raw_installer="$downloaded_installer"
+    fi
 
-# Define log directory and file
-LOG_DIR="/var/log/ansible"
-LOG_FILE="$LOG_DIR/ansible-playbook.log"
+    run_as_root "$raw_installer" "$@"
 
-# Create the log directory with appropriate permissions
-echo_info "Setting up log directory at $LOG_DIR..."
-sudo mkdir -p "$LOG_DIR"
-sudo chmod 775 "$LOG_DIR"
-# Optional: Change ownership to the current user to allow writing without sudo
-# sudo chown "$USER":"$USER" "$LOG_DIR"
+    if [[ -n "$downloaded_installer" ]]; then
+        rm -f "$downloaded_installer"
+    fi
 
-# Create the log file with appropriate permissions
-echo_info "Creating log file at $LOG_FILE..."
-sudo touch "$LOG_FILE"
-# Secure the log file by setting appropriate permissions
-sudo chmod 664 "$LOG_FILE"
-# Optional: Change ownership to the current user to allow writing without sudo
-# sudo chown "$USER":"$USER" "$LOG_FILE"
+    echo_info "Setup completed successfully via setup-raw.sh."
+}
 
-set +x  # Disable debug output to hide sensitive variables
-
-# Parse optional CLI flags while preserving existing extra-var passthrough behavior.
-SKIP_HOSTNAME_CONF=false
-EXTRA_VARS_ARGS=()
-
-for arg in "$@"; do
-    case "$arg" in
-        --skip-hostname-conf)
-            SKIP_HOSTNAME_CONF=true
-            ;;
-        *)
-            EXTRA_VARS_ARGS+=("$arg")
-            ;;
-    esac
-done
-
-# Capture script arguments to pass to Ansible as extra-vars.
-EXTRA_VARS_ARGS+=("skip_hostname_conf=$SKIP_HOSTNAME_CONF")
-
-# Run the Ansible playbook with logging and extra-vars
-echo_info "Running the Ansible playbook..."
-ANSIBLE_LOG_PATH="$LOG_FILE" "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "${EXTRA_VARS_ARGS[*]}"
-
-# Deactivate the virtual environment
-echo_info "Deactivating the virtual environment..."
-deactivate
-
-echo_info "Ansible playbook execution completed successfully."
+main "$@"
 
 # Sample call:
 # curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
