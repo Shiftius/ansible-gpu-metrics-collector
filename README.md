@@ -43,6 +43,19 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
 
 `setup-raw.sh` can still be invoked directly from a checkout or via curl when you do not need the compatibility wrapper.
 
+#### Benchmarking Raw vs. Ansible Setup
+Use `reset-setup.sh` between runs to remove the metrics packages, generated config, repositories, local metrics data, and metadata created by either setup path.
+
+```bash
+sudo ./reset-setup.sh --purge-benchmark-cache
+time ./setup-via-ansible.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+
+sudo ./reset-setup.sh --purge-benchmark-cache
+time ./setup.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+```
+
+For a data-preserving reset, use `sudo ./reset-setup.sh --keep-data`. The reset script does not restore the hostname.
+
 #### Method 1: Interactive Secure Input (RECOMMENDED)
 ```bash
 # Use the secure wrapper script for interactive credential input
