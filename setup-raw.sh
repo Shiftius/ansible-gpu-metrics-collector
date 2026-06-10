@@ -97,6 +97,29 @@ apt_update() {
     DEBIAN_FRONTEND=noninteractive apt-get update
 }
 
+apt_package_installed() {
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+}
+
+apt_install_missing() {
+    local missing=()
+    local package
+
+    for package in "$@"; do
+        if ! apt_package_installed "$package"; then
+            missing+=("$package")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        echo_info "Base packages already installed."
+        return
+    fi
+
+    apt_update
+    apt_install "${missing[@]}"
+}
+
 download_file() {
     local url="$1"
     local dest="$2"
@@ -290,8 +313,7 @@ install_base_packages() {
     fi
 
     echo_info "Installing base packages..."
-    apt_update
-    apt_install ca-certificates curl dmidecode gnupg jq lshw pciutils wget
+    apt_install_missing ca-certificates curl dmidecode gnupg jq lshw pciutils wget
 }
 
 configure_repositories() {
@@ -365,6 +387,7 @@ configure_influxdb() {
     if [[ -z "$bucket_id" ]]; then
         echo_info "Creating InfluxDB organization, bucket, and admin token..."
         influx setup \
+            --name default \
             --username "$INFLUX_USERNAME" \
             --password "$INFLUX_PASSWORD" \
             --org "$INFLUX_ORG" \

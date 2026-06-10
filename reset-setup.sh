@@ -5,6 +5,7 @@ set +x
 
 PURGE_DATA=true
 PURGE_BENCHMARK_CACHE=false
+REFRESH_APT=false
 FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
@@ -33,6 +34,7 @@ can be benchmarked from a cleaner state.
 Options:
   --keep-data              Keep InfluxDB/Grafana/Telegraf data and /etc/brev metadata.
   --purge-benchmark-cache  Also remove /tmp/ansible_env, /tmp/mc, and /var/log/ansible.
+  --refresh-apt            Run apt-get update after removing repository files.
   --fleet-package NAME     Fleet Debian package name to purge. Default: fleet.
   --metadata-path PATH     Metadata JSON path to remove. Default: /etc/brev/metadata.json.
   -h, --help               Show this help.
@@ -57,6 +59,10 @@ parse_args() {
                 ;;
             --purge-benchmark-cache)
                 PURGE_BENCHMARK_CACHE=true
+                shift
+                ;;
+            --refresh-apt)
+                REFRESH_APT=true
                 shift
                 ;;
             --fleet-package)
@@ -238,6 +244,8 @@ remove_config_and_data() {
             /var/log/influxdb \
             /var/log/influxdb2 \
             /var/log/telegraf \
+            /root/.influxdbv2 \
+            /home/ubuntu/.influxdbv2 \
             "$METADATA_PATH" \
             "${METADATA_PATH}.bak" \
             "${METADATA_PATH}.invalid"
@@ -256,7 +264,7 @@ remove_benchmark_cache() {
 }
 
 refresh_apt() {
-    if command -v apt-get >/dev/null 2>&1; then
+    if [[ "$REFRESH_APT" == true ]] && command -v apt-get >/dev/null 2>&1; then
         echo_info "Refreshing apt package lists..."
         wait_for_apt_lock
         DEBIAN_FRONTEND=noninteractive apt-get update || echo_warn "apt-get update failed after repository cleanup."
