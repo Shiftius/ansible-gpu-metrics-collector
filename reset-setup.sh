@@ -139,14 +139,6 @@ package_present() {
     dpkg-query -W "$1" >/dev/null 2>&1
 }
 
-unit_file_exists() {
-    local service="$1"
-
-    [[ -e "/etc/systemd/system/${service}" ]] \
-        || [[ -e "/lib/systemd/system/${service}" ]] \
-        || [[ -e "/usr/lib/systemd/system/${service}" ]]
-}
-
 cleanup_temp_units() {
     if [[ "$TEMP_INFLUXDB_UNIT_CREATED" == true ]]; then
         rm -f "$TEMP_INFLUXDB_UNIT_PATH"
@@ -155,7 +147,7 @@ cleanup_temp_units() {
 }
 
 ensure_influxdb_unit_for_package_removal() {
-    if ! package_present influxdb2 || unit_file_exists influxdb.service; then
+    if ! package_present influxdb2; then
         return
     fi
 
