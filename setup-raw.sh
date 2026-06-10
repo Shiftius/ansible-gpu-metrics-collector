@@ -89,12 +89,12 @@ wait_for_apt_lock() {
 
 apt_install() {
     wait_for_apt_lock
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+    NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
 }
 
 apt_update() {
     wait_for_apt_lock
-    DEBIAN_FRONTEND=noninteractive apt-get update
+    NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get update
 }
 
 apt_package_installed() {
@@ -804,7 +804,7 @@ install_fleet_package() {
     echo_info "Installing fleet package..."
     download_file "$FLEET_AMD64_URL" "$pkg_path" 0644
     wait_for_apt_lock
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg_path"; then
+    if ! NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg_path"; then
         echo_warn "Fleet package installation failed; continuing to match the non-failing Ansible role."
     fi
 }

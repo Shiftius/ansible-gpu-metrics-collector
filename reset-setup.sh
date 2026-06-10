@@ -193,9 +193,9 @@ purge_packages() {
 
     echo_info "Purging packages: ${installed[*]}"
     wait_for_apt_lock
-    DEBIAN_FRONTEND=noninteractive apt-get purge -y "${installed[@]}"
+    NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get purge -y "${installed[@]}"
     wait_for_apt_lock
-    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
+    NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
 }
 
 remove_paths() {
@@ -267,7 +267,7 @@ refresh_apt() {
     if [[ "$REFRESH_APT" == true ]] && command -v apt-get >/dev/null 2>&1; then
         echo_info "Refreshing apt package lists..."
         wait_for_apt_lock
-        DEBIAN_FRONTEND=noninteractive apt-get update || echo_warn "apt-get update failed after repository cleanup."
+        NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get update || echo_warn "apt-get update failed after repository cleanup."
     fi
 }
 
