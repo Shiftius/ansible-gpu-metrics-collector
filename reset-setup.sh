@@ -8,6 +8,8 @@ PURGE_BENCHMARK_CACHE=false
 FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
+TEMP_INFLUXDB_UNIT_CREATED=false
+TEMP_INFLUXDB_UNIT_PATH="/etc/systemd/system/influxdb.service"
 
 echo_info() {
     printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
@@ -133,8 +135,46 @@ stop_disable_service() {
     fi
 }
 
-package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+package_present() {
+    dpkg-query -W "$1" >/dev/null 2>&1
+}
+
+unit_file_exists() {
+    local service="$1"
+
+    [[ -e "/etc/systemd/system/${service}" ]] \
+        || [[ -e "/lib/systemd/system/${service}" ]] \
+        || [[ -e "/usr/lib/systemd/system/${service}" ]]
+}
+
+cleanup_temp_units() {
+    if [[ "$TEMP_INFLUXDB_UNIT_CREATED" == true ]]; then
+        rm -f "$TEMP_INFLUXDB_UNIT_PATH"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+}
+
+ensure_influxdb_unit_for_package_removal() {
+    if ! package_present influxdb2 || unit_file_exists influxdb.service; then
+        return
+    fi
+
+    echo_info "Creating temporary influxdb.service so the influxdb2 package removal script can complete..."
+    cat > "$TEMP_INFLUXDB_UNIT_PATH" <<'EOF'
+[Unit]
+Description=Temporary InfluxDB service stub for package removal
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 0644 "$TEMP_INFLUXDB_UNIT_PATH"
+    systemctl daemon-reload
+    TEMP_INFLUXDB_UNIT_CREATED=true
 }
 
 purge_packages() {
@@ -143,7 +183,7 @@ purge_packages() {
     local package
 
     for package in "${packages[@]}"; do
-        if package_installed "$package"; then
+        if package_present "$package"; then
             installed+=("$package")
         fi
     done
@@ -232,6 +272,8 @@ refresh_apt() {
 }
 
 main() {
+    trap cleanup_temp_units EXIT
+
     parse_args "$@"
     require_root
 
@@ -244,6 +286,7 @@ main() {
     stop_disable_service grafana-server
     stop_disable_service influxdb
 
+    ensure_influxdb_unit_for_package_removal
     purge_packages grafana telegraf influxdb2 influxdb2-cli "$FLEET_PACKAGE_NAME"
     remove_repo_state
     remove_config_and_data
