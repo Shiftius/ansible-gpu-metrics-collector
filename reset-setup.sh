@@ -261,6 +261,7 @@ remove_benchmark_cache() {
 
     echo_info "Removing benchmark cache from the Ansible bootstrap path..."
     remove_paths /tmp/ansible_env /tmp/mc /var/log/ansible
+    chmod 1777 /tmp
 }
 
 refresh_apt() {
