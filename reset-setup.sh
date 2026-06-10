@@ -6,7 +6,7 @@ set +x
 PURGE_DATA=true
 PURGE_BENCHMARK_CACHE=false
 REFRESH_APT=false
-FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet}"
+FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet-osquery}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 TEMP_INFLUXDB_UNIT_CREATED=false
@@ -35,7 +35,7 @@ Options:
   --keep-data              Keep InfluxDB/Grafana/Telegraf data and /etc/brev metadata.
   --purge-benchmark-cache  Also remove /tmp/ansible_env, /tmp/mc, and /var/log/ansible.
   --refresh-apt            Run apt-get update after removing repository files.
-  --fleet-package NAME     Fleet Debian package name to purge. Default: fleet.
+  --fleet-package NAME     Fleet Debian package name to purge. Default: fleet-osquery.
   --metadata-path PATH     Metadata JSON path to remove. Default: /etc/brev/metadata.json.
   -h, --help               Show this help.
 
@@ -287,7 +287,7 @@ main() {
     stop_disable_service influxdb
 
     ensure_influxdb_unit_for_package_removal
-    purge_packages grafana telegraf influxdb2 influxdb2-cli "$FLEET_PACKAGE_NAME"
+    purge_packages grafana telegraf influxdb2 influxdb2-cli "$FLEET_PACKAGE_NAME" fleet
     remove_repo_state
     remove_config_and_data
     remove_benchmark_cache
