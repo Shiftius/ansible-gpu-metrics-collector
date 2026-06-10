@@ -14,7 +14,10 @@ readonly DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/Shiftius/ansi
 readonly DEFAULT_FLEET_AMD64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/f2a389a0c40047587c32daafd34d407bc130075f8d29decf2c0aad5f60464043"
 readonly DEFAULT_FLEET_PKG_AMD64="fleet-1.0.0_amd64.deb"
 
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd || true)"
 ASSET_BASE_URL="${ASSET_BASE_URL:-$DEFAULT_ASSET_BASE_URL}"
+ASSET_DIR="${ASSET_DIR:-}"
 AWS_REGION_VALUE="${AWS_REGION:-${aws_region:-us-west-2}}"
 AWS_TIMESTREAM_ACCESS_KEY_VALUE="${AWS_TIMESTREAM_ACCESS_KEY:-${aws_timestream_access_key:-empty-access-key}}"
 AWS_TIMESTREAM_SECRET_KEY_VALUE="${AWS_TIMESTREAM_SECRET_KEY:-${aws_timestream_secret_key:-empty-secret-key}}"
@@ -132,6 +135,26 @@ download_file() {
     fi
     curl -fsSL "$url" -o "$dest"
     chmod "$mode" "$dest"
+}
+
+copy_or_download_asset() {
+    local relative_path="$1"
+    local dest="$2"
+    local mode="${3:-0644}"
+    local asset_root
+    local local_path
+
+    for asset_root in "$ASSET_DIR" "$SCRIPT_DIR"; do
+        [[ -n "$asset_root" ]] || continue
+        local_path="${asset_root}/${relative_path}"
+        if [[ -f "$local_path" ]]; then
+            install -d -m 0755 "$(dirname "$dest")"
+            install -m "$mode" "$local_path" "$dest"
+            return
+        fi
+    done
+
+    download_file "${ASSET_BASE_URL}/${relative_path}" "$dest" "$mode"
 }
 
 escape_sed_replacement() {
@@ -349,8 +372,14 @@ configure_repositories() {
 }
 
 install_metrics_packages() {
+    local pkg_path="/opt/${FLEET_PKG_AMD64}"
+
     echo_info "Installing metrics packages..."
-    apt_install grafana influxdb2 influxdb2-cli telegraf wget
+    download_file "$FLEET_AMD64_URL" "$pkg_path" 0644
+    if ! apt_install grafana influxdb2 influxdb2-cli telegraf "$pkg_path"; then
+        echo_warn "Combined metrics and fleet package install failed; retrying metrics packages without fleet."
+        apt_install grafana influxdb2 influxdb2-cli telegraf
+    fi
 }
 
 systemctl_enable_restart() {
@@ -513,7 +542,7 @@ configure_grafana() {
     install -d -m 0755 /var/lib/grafana/dashboards
 
     grafana_template="$(mktemp)"
-    download_file "${ASSET_BASE_URL}/roles/telegraf_config/templates/grafana/grafana.ini" "$grafana_template" 0644
+    copy_or_download_asset "roles/telegraf_config/templates/grafana/grafana.ini" "$grafana_template" 0644
     render_grafana_ini "$grafana_template" /etc/grafana/grafana.ini
     rm -f "$grafana_template"
 
@@ -555,7 +584,7 @@ providers:
     path: /var/lib/grafana/dashboards
 EOF
 
-    download_file "${ASSET_BASE_URL}/roles/telegraf_config/templates/grafana/dashboard.json" /var/lib/grafana/dashboards/metrics.json 0644
+    copy_or_download_asset "roles/telegraf_config/templates/grafana/dashboard.json" /var/lib/grafana/dashboards/metrics.json 0644
     chown -R grafana:grafana /var/lib/grafana/dashboards
     systemctl_enable_restart grafana-server
 }
@@ -798,17 +827,6 @@ collect_hardware_metadata() {
     rm -f "$metadata_tmp"
 }
 
-install_fleet_package() {
-    local pkg_path="/opt/${FLEET_PKG_AMD64}"
-
-    echo_info "Installing fleet package..."
-    download_file "$FLEET_AMD64_URL" "$pkg_path" 0644
-    wait_for_apt_lock
-    if ! NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg_path"; then
-        echo_warn "Fleet package installation failed; continuing to match the non-failing Ansible role."
-    fi
-}
-
 main() {
     require_root
     parse_args "$@"
@@ -825,7 +843,6 @@ main() {
     configure_influxdb
     configure_telegraf
     configure_grafana
-    install_fleet_package
 
     echo_info "Raw metrics collector setup completed successfully."
 }

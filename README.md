@@ -22,6 +22,7 @@ This setup handles sensitive AWS credentials and database passwords. The followi
 
 #### Default: Fast Raw Shell Setup
 For fresh instances where startup time matters, use `setup.sh`. It delegates to the flattened raw shell installer, leaves the Ansible playbook and roles in place, and skips Python, the Python virtualenv, and Ansible install work.
+When run from a checkout, `setup.sh` also uses local Grafana assets instead of fetching them over HTTP and installs the metrics packages plus the Fleet deb in a single apt transaction.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \

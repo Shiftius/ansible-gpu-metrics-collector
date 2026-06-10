@@ -65,11 +65,14 @@ download_raw_installer() {
 main() {
     local raw_installer=""
     local downloaded_installer=""
+    local script_dir=""
 
     echo_info "Delegating setup to the raw shell installer..."
 
     if raw_installer="$(local_raw_installer)"; then
         echo_info "Using local setup-raw.sh."
+        script_dir="$(cd "$(dirname "$raw_installer")" && pwd)"
+        export ASSET_DIR="${ASSET_DIR:-$script_dir}"
     else
         downloaded_installer="$(mktemp)"
         echo_info "Downloading setup-raw.sh from ${RAW_INSTALLER_URL}..."
