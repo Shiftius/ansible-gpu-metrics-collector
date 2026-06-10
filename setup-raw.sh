@@ -111,6 +111,63 @@ download_file() {
     chmod "$mode" "$dest"
 }
 
+escape_sed_replacement() {
+    printf '%s' "$1" | sed 's/[&@\\]/\\&/g'
+}
+
+run_capture() {
+    sh -c "$1" 2>/dev/null || true
+}
+
+first_line() {
+    run_capture "$1" | head -n 1 | tr -d '\n'
+}
+
+int_value() {
+    local value="${1:-0}"
+
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$value"
+    else
+        printf '0'
+    fi
+}
+
+sysfs_first() {
+    local default="$1"
+    shift
+    local path value
+
+    for path in "$@"; do
+        if [[ -r "$path" ]]; then
+            value="$(tr -d '\n' < "$path")"
+            if [[ -n "$value" ]]; then
+                printf '%s' "$value"
+                return
+            fi
+        fi
+    done
+
+    printf '%s' "$default"
+}
+
+nvidia_query() {
+    local field="$1"
+    local first_only="${2:-false}"
+    local output
+
+    output="$(run_capture "nvidia-smi --query-gpu=${field} --format=csv,noheader")"
+    if [[ -z "$output" ]]; then
+        return
+    fi
+
+    if [[ "$first_only" == true ]]; then
+        printf '%s' "$output" | awk 'NF {print; exit}' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+    else
+        printf '%s' "$output" | awk 'NF {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); printf "%s%s", sep, $0; sep=","}'
+    fi
+}
+
 parse_args() {
     local arg value
 
@@ -234,7 +291,7 @@ install_base_packages() {
 
     echo_info "Installing base packages..."
     apt_update
-    apt_install ca-certificates curl dmidecode gnupg jq lshw pciutils python3 wget
+    apt_install ca-certificates curl dmidecode gnupg jq lshw pciutils wget
 }
 
 configure_repositories() {
@@ -410,26 +467,17 @@ EOF
 render_grafana_ini() {
     local template_file="$1"
     local output_file="$2"
+    local hostid domain subpath
 
-    python3 - "$template_file" "$output_file" <<'PY'
-import os
-import sys
+    hostid="$(escape_sed_replacement "$HOSTID")"
+    domain="$(escape_sed_replacement "$DOMAIN_VALUE")"
+    subpath="$(escape_sed_replacement "$GRAFANA_SUBPATH")"
 
-template_path, output_path = sys.argv[1], sys.argv[2]
-with open(template_path, "r", encoding="utf-8") as handle:
-    content = handle.read()
-
-replacements = {
-    "{{ hostid }}": os.environ["HOSTID"],
-    "{{ domain }}": os.environ["DOMAIN_VALUE"],
-    "{{ grafana.subpath }}": os.environ["GRAFANA_SUBPATH"],
-}
-for old, new in replacements.items():
-    content = content.replace(old, new)
-
-with open(output_path, "w", encoding="utf-8") as handle:
-    handle.write(content)
-PY
+    sed \
+        -e "s@{{ hostid }}@${hostid}@g" \
+        -e "s@{{ domain }}@${domain}@g" \
+        -e "s@{{ grafana.subpath }}@${subpath}@g" \
+        "$template_file" > "$output_file"
 }
 
 configure_grafana() {
@@ -489,211 +537,242 @@ EOF
     systemctl_enable_restart grafana-server
 }
 
-collect_hardware_metadata() {
-    echo_info "Collecting hardware metadata..."
+network_interfaces_json() {
+    local interfaces='[]'
+    local path
 
-    METADATA_PATH="$METADATA_PATH" python3 <<'PY'
-import glob
-import json
-import os
-import platform
-import shutil
-import socket
-import subprocess
-from pathlib import Path
+    for path in /sys/class/net/*; do
+        [[ -e "$path" ]] || continue
+        interfaces="$(jq -c --arg iface "$(basename "$path")" '. + [$iface]' <<< "$interfaces")"
+    done
 
-metadata_path = Path(os.environ.get("METADATA_PATH", "/etc/brev/metadata.json"))
-
-def run(command):
-    try:
-        return subprocess.check_output(command, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
-    except Exception:
-        return ""
-
-def run_lines(command):
-    output = run(command)
-    return [line.strip() for line in output.splitlines() if line.strip()]
-
-def first_line(command):
-    lines = run_lines(command)
-    return lines[0] if lines else ""
-
-def int_value(value):
-    try:
-        return int(str(value).strip())
-    except Exception:
-        return 0
-
-def nvidia_query(field, join_lines=True):
-    output = run(f"nvidia-smi --query-gpu={field} --format=csv,noheader 2>/dev/null")
-    if not output:
-        return ""
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if not join_lines:
-        return lines[0] if lines else ""
-    return ",".join(lines)
-
-def cpu_model():
-    model = first_line("awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo")
-    return model or platform.processor() or "Unknown"
-
-def meminfo_mb(key):
-    raw = first_line(f"awk '/^{key}:/ {{print $2; exit}}' /proc/meminfo")
-    return int_value(raw) // 1024
-
-def processor_count():
-    return int_value(run("grep -c '^physical id' /proc/cpuinfo")) or 1
-
-def processor_cores():
-    return int_value(first_line("awk -F': ' '/cpu cores/ {print $2; exit}' /proc/cpuinfo"))
-
-def processor_vcpus():
-    return os.cpu_count() or 0
-
-def threads_per_core():
-    cores = processor_cores()
-    vcpus = processor_vcpus()
-    return int(vcpus / cores) if cores and vcpus else 0
-
-def sysfs_first(paths, default="unknown"):
-    for path in paths:
-        try:
-            value = Path(path).read_text(encoding="utf-8", errors="ignore").strip()
-            if value:
-                return value
-        except Exception:
-            pass
-    return default
-
-def network_interfaces():
-    return sorted(Path(path).name for path in glob.glob("/sys/class/net/*"))
-
-def storage_devices():
-    devices = {}
-    for path in sorted(glob.glob("/sys/block/*")):
-        name = Path(path).name
-        if name.startswith(("loop", "ram")):
-            continue
-        size = int_value(sysfs_first([f"{path}/size"], "0"))
-        model = sysfs_first([f"{path}/device/model"], "")
-        rotational = sysfs_first([f"{path}/queue/rotational"], "")
-        devices[name] = {
-            "model": model,
-            "sectors": size,
-            "size_bytes": size * 512,
-            "rotational": rotational,
-        }
-    return devices
-
-lspci_gpu_count = int_value(run("lspci 2>/dev/null | grep -icE 'VGA|3D controller.*NVIDIA|Display.*NVIDIA'"))
-nvidia_gpu_count = int_value(nvidia_query("count", join_lines=False))
-amd_gpu_count = int_value(run("lspci 2>/dev/null | grep -icE 'VGA.*AMD|3D.*AMD|Display.*AMD'"))
-intel_gpu_count = int_value(run("lspci 2>/dev/null | grep -icE 'VGA.*Intel|Display.*Intel.*Graphics'"))
-total_gpu_count = (nvidia_gpu_count if nvidia_gpu_count > 0 else lspci_gpu_count) + amd_gpu_count + intel_gpu_count
-
-cuda_toolkit_version = run("nvcc --version 2>/dev/null | grep 'release' | sed 's/.*release \\([0-9.]*\\).*/\\1/' | tr -d '\\n'")
-cuda_runtime_version = run("ldconfig -p 2>/dev/null | grep -oP 'libcudart\\.so\\.\\K[0-9.]+' | head -1 | tr -d '\\n'")
-nvidia_driver_version = nvidia_query("driver_version", join_lines=False)
-nvidia_gpu_names = nvidia_query("name")
-nvidia_gpu_memory = nvidia_query("memory.total")
-nvidia_gpu_compute_cap = nvidia_query("compute_cap")
-
-hardware_metadata = {
-    "hardware_summary": {
-        "cpu_model": cpu_model(),
-        "total_cpus": processor_count(),
-        "total_cores": processor_cores(),
-        "total_vcpus": processor_vcpus(),
-        "total_memory_mb": meminfo_mb("MemTotal"),
-        "total_gpus": total_gpu_count,
-        "gpu_models": nvidia_gpu_names,
-        "nvidia_driver_version": nvidia_driver_version,
-        "cuda_toolkit_version": cuda_toolkit_version,
-        "cuda_runtime_version": cuda_runtime_version,
-        "gpu_memory_total_mb": nvidia_gpu_memory,
-        "gpu_compute_capabilities": nvidia_gpu_compute_cap,
-        "system_vendor": sysfs_first(["/sys/class/dmi/id/sys_vendor"], "Unknown"),
-        "system_model": sysfs_first(["/sys/class/dmi/id/product_name"], "Unknown"),
-    },
-    "hardware": {
-        "cpu": {
-            "architecture": platform.machine() or "unknown",
-            "processor_count": processor_count(),
-            "processor_cores": processor_cores(),
-            "processor_threads_per_core": threads_per_core(),
-            "processor_vcpus": processor_vcpus(),
-            "model_name": cpu_model(),
-        },
-        "memory": {
-            "total_mb": meminfo_mb("MemTotal"),
-            "free_mb": meminfo_mb("MemFree"),
-            "swap_total_mb": meminfo_mb("SwapTotal"),
-            "swap_free_mb": meminfo_mb("SwapFree"),
-        },
-        "motherboard": {
-            "manufacturer": sysfs_first(["/sys/class/dmi/id/board_vendor", "/sys/class/dmi/id/sys_vendor"], "unknown"),
-            "product_name": sysfs_first(["/sys/class/dmi/id/board_name", "/sys/class/dmi/id/product_name"], "unknown"),
-            "product_version": sysfs_first(["/sys/class/dmi/id/board_version", "/sys/class/dmi/id/product_version"], "unknown"),
-        },
-        "bios": {
-            "vendor": sysfs_first(["/sys/class/dmi/id/bios_version"], "unknown"),
-            "version": sysfs_first(["/sys/class/dmi/id/bios_version"], "unknown"),
-            "date": sysfs_first(["/sys/class/dmi/id/bios_date"], "unknown"),
-        },
-        "system": {
-            "vendor": sysfs_first(["/sys/class/dmi/id/sys_vendor"], "unknown"),
-            "product_name": sysfs_first(["/sys/class/dmi/id/product_name"], "unknown"),
-            "serial_number": sysfs_first(["/sys/class/dmi/id/product_serial"], "unknown"),
-            "uuid": sysfs_first(["/sys/class/dmi/id/product_uuid"], "unknown"),
-            "fqdn": socket.getfqdn(),
-        },
-        "gpu": {
-            "total_count": total_gpu_count,
-            "nvidia": {
-                "count": str(nvidia_gpu_count),
-                "driver_version": nvidia_driver_version,
-                "cuda_toolkit_version": cuda_toolkit_version,
-                "cuda_runtime_version": cuda_runtime_version,
-                "gpu_models": nvidia_gpu_names,
-                "serial_numbers": nvidia_query("serial"),
-                "uuids": nvidia_query("uuid"),
-                "memory_total_mb": nvidia_gpu_memory,
-                "compute_capabilities": nvidia_gpu_compute_cap,
-                "pci_bus_ids": nvidia_query("pci.bus_id"),
-                "persistence_mode": nvidia_query("persistence_mode", join_lines=False),
-                "compute_mode": nvidia_query("compute_mode", join_lines=False),
-            },
-            "amd": {"count": str(amd_gpu_count)},
-            "intel": {"count": str(intel_gpu_count)},
-        },
-        "network": {"interfaces": network_interfaces()},
-        "storage": {"devices": storage_devices()},
-    },
+    jq -c 'sort' <<< "$interfaces"
 }
 
-existing = {}
-if metadata_path.exists():
-    try:
-        existing = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except Exception:
-        backup_path = metadata_path.with_suffix(metadata_path.suffix + ".invalid")
-        shutil.copy2(metadata_path, backup_path)
+storage_devices_json() {
+    local devices='{}'
+    local model name path rotational sectors
 
-def merge(a, b):
-    result = dict(a)
-    for key, value in b.items():
-        if isinstance(result.get(key), dict) and isinstance(value, dict):
-            result[key] = merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+    for path in /sys/block/*; do
+        [[ -e "$path" ]] || continue
+        name="$(basename "$path")"
+        case "$name" in
+            loop*|ram*)
+                continue
+                ;;
+        esac
 
-metadata_path.parent.mkdir(parents=True, exist_ok=True)
-if metadata_path.exists():
-    shutil.copy2(metadata_path, str(metadata_path) + ".bak")
-metadata_path.write_text(json.dumps(merge(existing, hardware_metadata), indent=4, sort_keys=True) + "\n", encoding="utf-8")
-metadata_path.chmod(0o644)
-PY
+        sectors="$(int_value "$(sysfs_first 0 "${path}/size")")"
+        model="$(sysfs_first "" "${path}/device/model")"
+        rotational="$(sysfs_first "" "${path}/queue/rotational")"
+        devices="$(jq -c \
+            --arg name "$name" \
+            --arg model "$model" \
+            --arg rotational "$rotational" \
+            --argjson sectors "$sectors" \
+            '. + {($name): {
+                model: $model,
+                sectors: $sectors,
+                size_bytes: ($sectors * 512),
+                rotational: $rotational
+            }}' <<< "$devices")"
+    done
+
+    printf '%s\n' "$devices"
+}
+
+collect_hardware_metadata() {
+    local amd_gpu_count architecture bios_date bios_version cpu_model cuda_runtime_version cuda_toolkit_version
+    local existing_metadata fqdn gpu_count_lspci hardware_metadata intel_gpu_count mem_free_mb mem_total_mb
+    local metadata_dir metadata_tmp nvidia_compute_mode nvidia_driver_version nvidia_gpu_compute_cap
+    local nvidia_gpu_count nvidia_gpu_memory nvidia_gpu_names nvidia_gpu_pci_bus_ids nvidia_gpu_serials
+    local nvidia_gpu_uuids nvidia_persistence_mode processor_cores processor_count processor_threads_per_core
+    local processor_vcpus product_name product_serial product_uuid product_version storage_devices
+    local swap_free_mb swap_total_mb system_model system_vendor total_gpu_count
+
+    echo_info "Collecting hardware metadata..."
+
+    cpu_model="$(first_line "awk -F': ' '/model name/ {print \$2; exit}' /proc/cpuinfo")"
+    [[ -n "$cpu_model" ]] || cpu_model="Unknown"
+    architecture="$(uname -m 2>/dev/null || echo unknown)"
+    processor_count="$(int_value "$(first_line "awk -F': ' '/physical id/ {ids[\$2]=1} END {print length(ids)}' /proc/cpuinfo")")"
+    [[ "$processor_count" -gt 0 ]] || processor_count=1
+    processor_cores="$(int_value "$(first_line "awk -F': ' '/cpu cores/ {print \$2; exit}' /proc/cpuinfo")")"
+    processor_vcpus="$(int_value "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)")"
+    if [[ "$processor_cores" -gt 0 && "$processor_vcpus" -gt 0 ]]; then
+        processor_threads_per_core=$((processor_vcpus / processor_cores))
+    else
+        processor_threads_per_core=0
+    fi
+
+    mem_total_mb=$(( $(int_value "$(first_line "awk '/^MemTotal:/ {print \$2; exit}' /proc/meminfo")") / 1024 ))
+    mem_free_mb=$(( $(int_value "$(first_line "awk '/^MemFree:/ {print \$2; exit}' /proc/meminfo")") / 1024 ))
+    swap_total_mb=$(( $(int_value "$(first_line "awk '/^SwapTotal:/ {print \$2; exit}' /proc/meminfo")") / 1024 ))
+    swap_free_mb=$(( $(int_value "$(first_line "awk '/^SwapFree:/ {print \$2; exit}' /proc/meminfo")") / 1024 ))
+
+    system_vendor="$(sysfs_first "unknown" /sys/class/dmi/id/sys_vendor)"
+    system_model="$(sysfs_first "unknown" /sys/class/dmi/id/product_name)"
+    product_name="$system_model"
+    product_version="$(sysfs_first "unknown" /sys/class/dmi/id/product_version)"
+    product_serial="$(sysfs_first "unknown" /sys/class/dmi/id/product_serial)"
+    product_uuid="$(sysfs_first "unknown" /sys/class/dmi/id/product_uuid)"
+    bios_version="$(sysfs_first "unknown" /sys/class/dmi/id/bios_version)"
+    bios_date="$(sysfs_first "unknown" /sys/class/dmi/id/bios_date)"
+    fqdn="$(hostname -f 2>/dev/null || hostname)"
+
+    gpu_count_lspci="$(int_value "$(run_capture "lspci 2>/dev/null | grep -icE 'VGA|3D controller.*NVIDIA|Display.*NVIDIA'")")"
+    nvidia_gpu_count="$(int_value "$(nvidia_query count true)")"
+    amd_gpu_count="$(int_value "$(run_capture "lspci 2>/dev/null | grep -icE 'VGA.*AMD|3D.*AMD|Display.*AMD'")")"
+    intel_gpu_count="$(int_value "$(run_capture "lspci 2>/dev/null | grep -icE 'VGA.*Intel|Display.*Intel.*Graphics'")")"
+    if [[ "$nvidia_gpu_count" -gt 0 ]]; then
+        total_gpu_count=$((nvidia_gpu_count + amd_gpu_count + intel_gpu_count))
+    else
+        total_gpu_count=$((gpu_count_lspci + amd_gpu_count + intel_gpu_count))
+    fi
+
+    nvidia_driver_version="$(nvidia_query driver_version true)"
+    nvidia_gpu_names="$(nvidia_query name)"
+    nvidia_gpu_serials="$(nvidia_query serial)"
+    nvidia_gpu_uuids="$(nvidia_query uuid)"
+    nvidia_gpu_memory="$(nvidia_query memory.total)"
+    nvidia_gpu_compute_cap="$(nvidia_query compute_cap)"
+    nvidia_gpu_pci_bus_ids="$(nvidia_query pci.bus_id)"
+    nvidia_persistence_mode="$(nvidia_query persistence_mode true)"
+    nvidia_compute_mode="$(nvidia_query compute_mode true)"
+    cuda_toolkit_version="$(first_line "nvcc --version 2>/dev/null | grep 'release' | sed 's/.*release \([0-9.]*\).*/\1/'")"
+    cuda_runtime_version="$(first_line "ldconfig -p 2>/dev/null | grep -oP 'libcudart\.so\.\K[0-9.]+'")"
+
+    storage_devices="$(storage_devices_json)"
+
+    hardware_metadata="$(jq -n \
+        --arg cpu_model "$cpu_model" \
+        --arg architecture "$architecture" \
+        --argjson processor_count "$processor_count" \
+        --argjson processor_cores "$processor_cores" \
+        --argjson processor_threads_per_core "$processor_threads_per_core" \
+        --argjson processor_vcpus "$processor_vcpus" \
+        --argjson mem_total_mb "$mem_total_mb" \
+        --argjson mem_free_mb "$mem_free_mb" \
+        --argjson swap_total_mb "$swap_total_mb" \
+        --argjson swap_free_mb "$swap_free_mb" \
+        --argjson total_gpu_count "$total_gpu_count" \
+        --arg nvidia_gpu_count "$nvidia_gpu_count" \
+        --arg nvidia_driver_version "$nvidia_driver_version" \
+        --arg cuda_toolkit_version "$cuda_toolkit_version" \
+        --arg cuda_runtime_version "$cuda_runtime_version" \
+        --arg nvidia_gpu_names "$nvidia_gpu_names" \
+        --arg nvidia_gpu_serials "$nvidia_gpu_serials" \
+        --arg nvidia_gpu_uuids "$nvidia_gpu_uuids" \
+        --arg nvidia_gpu_memory "$nvidia_gpu_memory" \
+        --arg nvidia_gpu_compute_cap "$nvidia_gpu_compute_cap" \
+        --arg nvidia_gpu_pci_bus_ids "$nvidia_gpu_pci_bus_ids" \
+        --arg nvidia_persistence_mode "$nvidia_persistence_mode" \
+        --arg nvidia_compute_mode "$nvidia_compute_mode" \
+        --arg amd_gpu_count "$amd_gpu_count" \
+        --arg intel_gpu_count "$intel_gpu_count" \
+        --arg system_vendor "$system_vendor" \
+        --arg system_model "$system_model" \
+        --arg product_name "$product_name" \
+        --arg product_version "$product_version" \
+        --arg product_serial "$product_serial" \
+        --arg product_uuid "$product_uuid" \
+        --arg bios_version "$bios_version" \
+        --arg bios_date "$bios_date" \
+        --arg fqdn "$fqdn" \
+        --argjson interfaces "$(network_interfaces_json)" \
+        --argjson storage_devices "$storage_devices" \
+        '{
+            hardware_summary: {
+                cpu_model: $cpu_model,
+                total_cpus: $processor_count,
+                total_cores: $processor_cores,
+                total_vcpus: $processor_vcpus,
+                total_memory_mb: $mem_total_mb,
+                total_gpus: $total_gpu_count,
+                gpu_models: $nvidia_gpu_names,
+                nvidia_driver_version: $nvidia_driver_version,
+                cuda_toolkit_version: $cuda_toolkit_version,
+                cuda_runtime_version: $cuda_runtime_version,
+                gpu_memory_total_mb: $nvidia_gpu_memory,
+                gpu_compute_capabilities: $nvidia_gpu_compute_cap,
+                system_vendor: $system_vendor,
+                system_model: $system_model
+            },
+            hardware: {
+                cpu: {
+                    architecture: $architecture,
+                    processor_count: $processor_count,
+                    processor_cores: $processor_cores,
+                    processor_threads_per_core: $processor_threads_per_core,
+                    processor_vcpus: $processor_vcpus,
+                    model_name: $cpu_model
+                },
+                memory: {
+                    total_mb: $mem_total_mb,
+                    free_mb: $mem_free_mb,
+                    swap_total_mb: $swap_total_mb,
+                    swap_free_mb: $swap_free_mb
+                },
+                motherboard: {
+                    manufacturer: $system_vendor,
+                    product_name: $product_name,
+                    product_version: $product_version
+                },
+                bios: {
+                    vendor: $bios_version,
+                    version: $bios_version,
+                    date: $bios_date
+                },
+                system: {
+                    vendor: $system_vendor,
+                    product_name: $product_name,
+                    serial_number: $product_serial,
+                    uuid: $product_uuid,
+                    fqdn: $fqdn
+                },
+                gpu: {
+                    total_count: $total_gpu_count,
+                    nvidia: {
+                        count: $nvidia_gpu_count,
+                        driver_version: $nvidia_driver_version,
+                        cuda_toolkit_version: $cuda_toolkit_version,
+                        cuda_runtime_version: $cuda_runtime_version,
+                        gpu_models: $nvidia_gpu_names,
+                        serial_numbers: $nvidia_gpu_serials,
+                        uuids: $nvidia_gpu_uuids,
+                        memory_total_mb: $nvidia_gpu_memory,
+                        compute_capabilities: $nvidia_gpu_compute_cap,
+                        pci_bus_ids: $nvidia_gpu_pci_bus_ids,
+                        persistence_mode: $nvidia_persistence_mode,
+                        compute_mode: $nvidia_compute_mode
+                    },
+                    amd: {count: $amd_gpu_count},
+                    intel: {count: $intel_gpu_count}
+                },
+                network: {interfaces: $interfaces},
+                storage: {devices: $storage_devices}
+            }
+        }')"
+
+    metadata_dir="$(dirname "$METADATA_PATH")"
+    install -d -m 0755 "$metadata_dir"
+
+    existing_metadata="{}"
+    if [[ -f "$METADATA_PATH" ]]; then
+        if jq -e . "$METADATA_PATH" >/dev/null 2>&1; then
+            cp "$METADATA_PATH" "${METADATA_PATH}.bak"
+            existing_metadata="$(cat "$METADATA_PATH")"
+        else
+            cp "$METADATA_PATH" "${METADATA_PATH}.invalid"
+        fi
+    fi
+
+    metadata_tmp="$(mktemp)"
+    jq -S -s '.[0] * .[1]' \
+        <(printf '%s\n' "$existing_metadata") \
+        <(printf '%s\n' "$hardware_metadata") > "$metadata_tmp"
+    install -m 0644 "$metadata_tmp" "$METADATA_PATH"
+    rm -f "$metadata_tmp"
 }
 
 install_fleet_package() {

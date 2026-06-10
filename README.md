@@ -21,7 +21,7 @@ This setup handles sensitive AWS credentials and database passwords. The followi
 ### Running Securely
 
 #### Default: Fast Raw Shell Setup
-For fresh instances where startup time matters, use `setup.sh`. It delegates to the flattened raw shell installer, leaves the Ansible playbook and roles in place, and skips the Python virtualenv and Ansible install.
+For fresh instances where startup time matters, use `setup.sh`. It delegates to the flattened raw shell installer, leaves the Ansible playbook and roles in place, and skips Python, the Python virtualenv, and Ansible install work.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
