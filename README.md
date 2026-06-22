@@ -31,8 +31,10 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
 
 To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
 
-For parent orchestration that should remain best effort, append `--tolerate-failures`.
-The scripts still log `[ERROR]` and `[WARN]` status output, but normalize failures to exit code `0`.
+Failure tolerance is enabled by default for parent orchestration: the scripts still log `[ERROR]` and `[WARN]`
+status output, but normalize failures to exit code `0`. Use `--strict-failures` only when you want a
+benchmark/debug run to exit nonzero on failure. `--tolerate-failures` is still accepted to explicitly request
+the default behavior.
 
 The raw installer also accepts environment variables, which keeps secrets out of the process arguments:
 

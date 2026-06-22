@@ -34,7 +34,9 @@ INFLUX_PASSWORD="${INFLUX_PASSWORD:-LocaFluxCapacity2024}"
 INFLUX_USERNAME="${INFLUX_USERNAME:-lp}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 SKIP_HOSTNAME_CONF=false
-TOLERATE_FAILURES=false
+# Failures are tolerated by default so parent bootstrap/orchestration scripts do
+# not fail closed if this metrics setup encounters an issue.
+TOLERATE_FAILURES=true
 
 echo_info() {
     printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
@@ -59,7 +61,7 @@ exit_with_status() {
     local status="$1"
 
     if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
-        echo_warn "setup-raw.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        echo_warn "setup-raw.sh failed with exit code ${status}; failure tolerance enabled, exiting 0."
         exit 0
     fi
 
@@ -70,9 +72,14 @@ parse_tolerance_flag() {
     local arg
 
     for arg in "$@"; do
-        if [[ "$arg" == "--tolerate-failures" ]]; then
-            TOLERATE_FAILURES=true
-        fi
+        case "$arg" in
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
+                ;;
+        esac
     done
 }
 
@@ -259,6 +266,9 @@ parse_args() {
                 ;;
             --tolerate-failures)
                 TOLERATE_FAILURES=true
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
                 ;;
             skip_hostname_conf=*)
                 value="${arg#*=}"

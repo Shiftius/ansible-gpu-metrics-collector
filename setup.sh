@@ -13,7 +13,9 @@ export HISTFILE=/dev/null
 readonly DEFAULT_RAW_INSTALLER_URL="https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/${INSTALLER_REF:-main}/setup-raw.sh"
 
 RAW_INSTALLER_URL="${RAW_INSTALLER_URL:-$DEFAULT_RAW_INSTALLER_URL}"
-TOLERATE_FAILURES=false
+# Failures are tolerated by default so parent bootstrap/orchestration scripts do
+# not fail closed if this metrics setup encounters an issue.
+TOLERATE_FAILURES=true
 
 echo_info() {
     printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
@@ -31,7 +33,7 @@ exit_with_status() {
     local status="$1"
 
     if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
-        echo_warn "setup.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        echo_warn "setup.sh failed with exit code ${status}; failure tolerance enabled, exiting 0."
         exit 0
     fi
 
@@ -45,6 +47,9 @@ parse_wrapper_args() {
         case "$arg" in
             --tolerate-failures)
                 TOLERATE_FAILURES=true
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
                 ;;
         esac
     done
@@ -127,7 +132,7 @@ main() {
         rm -f "$downloaded_installer"
     fi
 
-    echo_info "Setup completed successfully via setup-raw.sh."
+    echo_info "Setup invocation finished via setup-raw.sh."
 }
 
 parse_wrapper_args "$@"

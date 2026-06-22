@@ -6,7 +6,9 @@ set +x
 PURGE_DATA=true
 PURGE_BENCHMARK_CACHE=false
 REFRESH_APT=false
-TOLERATE_FAILURES=false
+# Failures are tolerated by default so parent benchmark/orchestration scripts do
+# not fail closed if cleanup encounters an issue.
+TOLERATE_FAILURES=true
 FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet-osquery}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
@@ -36,7 +38,8 @@ Options:
   --keep-data              Keep InfluxDB/Grafana/Telegraf data and /etc/brev metadata.
   --purge-benchmark-cache  Also remove /tmp/ansible_env, /tmp/mc, and /var/log/ansible.
   --refresh-apt            Run apt-get update after removing repository files.
-  --tolerate-failures      Log failures but exit 0 for parent orchestration.
+  --tolerate-failures      Log failures but exit 0 for parent orchestration. This is the default.
+  --strict-failures        Exit nonzero on failures.
   --fleet-package NAME     Fleet Debian package name to purge. Default: fleet-osquery.
   --metadata-path PATH     Metadata JSON path to remove. Default: /etc/brev/metadata.json.
   -h, --help               Show this help.
@@ -56,7 +59,7 @@ exit_with_status() {
     local status="$1"
 
     if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
-        echo_warn "reset-setup.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        echo_warn "reset-setup.sh failed with exit code ${status}; failure tolerance enabled, exiting 0."
         exit 0
     fi
 
@@ -67,9 +70,14 @@ parse_tolerance_flag() {
     local arg
 
     for arg in "$@"; do
-        if [[ "$arg" == "--tolerate-failures" ]]; then
-            TOLERATE_FAILURES=true
-        fi
+        case "$arg" in
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
+                ;;
+        esac
     done
 }
 
@@ -103,6 +111,10 @@ parse_args() {
                 ;;
             --tolerate-failures)
                 TOLERATE_FAILURES=true
+                shift
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
                 shift
                 ;;
             --fleet-package)

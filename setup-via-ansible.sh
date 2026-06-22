@@ -2,7 +2,9 @@
 
 set +x
 
-TOLERATE_FAILURES=false
+# Failures are tolerated by default so parent benchmark/orchestration scripts do
+# not fail closed if the Ansible setup path encounters an issue.
+TOLERATE_FAILURES=true
 
 # Function to display informational messages
 echo_info() {
@@ -17,9 +19,14 @@ parse_tolerance_flag() {
     local arg
 
     for arg in "$@"; do
-        if [ "$arg" = "--tolerate-failures" ]; then
-            TOLERATE_FAILURES=true
-        fi
+        case "$arg" in
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                ;;
+            --strict-failures)
+                TOLERATE_FAILURES=false
+                ;;
+        esac
     done
 }
 
@@ -28,7 +35,7 @@ exit_or_tolerate() {
     local script_name="$2"
 
     if [ "$TOLERATE_FAILURES" = true ]; then
-        echo_warn "${script_name} failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        echo_warn "${script_name} failed with exit code ${status}; failure tolerance enabled, exiting 0."
         exit 0
     fi
 
@@ -137,6 +144,9 @@ for arg in "$@"; do
             ;;
         --tolerate-failures)
             TOLERATE_FAILURES=true
+            ;;
+        --strict-failures)
+            TOLERATE_FAILURES=false
             ;;
         *)
             EXTRA_VARS_ARGS+=("$arg")
