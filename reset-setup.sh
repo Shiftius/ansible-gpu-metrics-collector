@@ -6,6 +6,7 @@ set +x
 PURGE_DATA=true
 PURGE_BENCHMARK_CACHE=false
 REFRESH_APT=false
+TOLERATE_FAILURES=false
 FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet-osquery}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
@@ -35,6 +36,7 @@ Options:
   --keep-data              Keep InfluxDB/Grafana/Telegraf data and /etc/brev metadata.
   --purge-benchmark-cache  Also remove /tmp/ansible_env, /tmp/mc, and /var/log/ansible.
   --refresh-apt            Run apt-get update after removing repository files.
+  --tolerate-failures      Log failures but exit 0 for parent orchestration.
   --fleet-package NAME     Fleet Debian package name to purge. Default: fleet-osquery.
   --metadata-path PATH     Metadata JSON path to remove. Default: /etc/brev/metadata.json.
   -h, --help               Show this help.
@@ -46,8 +48,42 @@ EOF
 require_root() {
     if [[ "$(id -u)" -ne 0 ]]; then
         echo_error "Run this script as root or with sudo."
-        exit 1
+        return 1
     fi
+}
+
+exit_with_status() {
+    local status="$1"
+
+    if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
+        echo_warn "reset-setup.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        exit 0
+    fi
+
+    exit "$status"
+}
+
+parse_tolerance_flag() {
+    local arg
+
+    for arg in "$@"; do
+        if [[ "$arg" == "--tolerate-failures" ]]; then
+            TOLERATE_FAILURES=true
+        fi
+    done
+}
+
+run_main() {
+    local status
+
+    set +e
+    (
+        set -Eeuo pipefail
+        main "$@"
+    )
+    status="$?"
+
+    exit_with_status "$status"
 }
 
 parse_args() {
@@ -65,10 +101,14 @@ parse_args() {
                 REFRESH_APT=true
                 shift
                 ;;
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                shift
+                ;;
             --fleet-package)
                 if [[ $# -lt 2 ]]; then
                     echo_error "--fleet-package requires a package name."
-                    exit 1
+                    return 1
                 fi
                 FLEET_PACKAGE_NAME="$2"
                 shift 2
@@ -76,7 +116,7 @@ parse_args() {
             --metadata-path)
                 if [[ $# -lt 2 ]]; then
                     echo_error "--metadata-path requires a path."
-                    exit 1
+                    return 1
                 fi
                 METADATA_PATH="$2"
                 shift 2
@@ -88,7 +128,7 @@ parse_args() {
             *)
                 echo_error "Unknown option: $1"
                 usage
-                exit 1
+                return 1
                 ;;
         esac
     done
@@ -124,7 +164,7 @@ wait_for_apt_lock() {
 
         if (( elapsed >= lock_wait_time )); then
             echo_error "Timeout waiting for apt/dpkg locks to be released."
-            exit 1
+            return 1
         fi
 
         sleep "$interval"
@@ -280,7 +320,7 @@ main() {
 
     if ! command -v apt-get >/dev/null 2>&1; then
         echo_error "This reset script currently supports apt-based Debian/Ubuntu instances."
-        exit 1
+        return 1
     fi
 
     stop_disable_service telegraf
@@ -297,4 +337,5 @@ main() {
     echo_info "Reset completed. Hostname was not changed."
 }
 
-main "$@"
+parse_tolerance_flag "$@"
+run_main "$@"

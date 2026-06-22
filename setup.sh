@@ -13,13 +13,54 @@ export HISTFILE=/dev/null
 readonly DEFAULT_RAW_INSTALLER_URL="https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/${INSTALLER_REF:-main}/setup-raw.sh"
 
 RAW_INSTALLER_URL="${RAW_INSTALLER_URL:-$DEFAULT_RAW_INSTALLER_URL}"
+TOLERATE_FAILURES=false
 
 echo_info() {
     printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
 }
 
+echo_warn() {
+    printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2
+}
+
 echo_error() {
     printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2
+}
+
+exit_with_status() {
+    local status="$1"
+
+    if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
+        echo_warn "setup.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        exit 0
+    fi
+
+    exit "$status"
+}
+
+parse_wrapper_args() {
+    local arg
+
+    for arg in "$@"; do
+        case "$arg" in
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                ;;
+        esac
+    done
+}
+
+run_main() {
+    local status
+
+    set +e
+    (
+        set -Eeuo pipefail
+        main "$@"
+    )
+    status="$?"
+
+    exit_with_status "$status"
 }
 
 run_as_root() {
@@ -56,7 +97,7 @@ download_raw_installer() {
         wget -qO "$dest" "$RAW_INSTALLER_URL"
     else
         echo_error "Install curl or wget, or run setup.sh from a checkout that also contains setup-raw.sh."
-        exit 1
+        return 1
     fi
 
     chmod 0755 "$dest"
@@ -89,7 +130,8 @@ main() {
     echo_info "Setup completed successfully via setup-raw.sh."
 }
 
-main "$@"
+parse_wrapper_args "$@"
+run_main "$@"
 
 # Sample call:
 # curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''

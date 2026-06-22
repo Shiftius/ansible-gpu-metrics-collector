@@ -34,6 +34,7 @@ INFLUX_PASSWORD="${INFLUX_PASSWORD:-LocaFluxCapacity2024}"
 INFLUX_USERNAME="${INFLUX_USERNAME:-lp}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 SKIP_HOSTNAME_CONF=false
+TOLERATE_FAILURES=false
 
 echo_info() {
     printf '\033[1;34m[INFO]\033[0m %s\n' "$*"
@@ -50,8 +51,42 @@ echo_error() {
 require_root() {
     if [[ "$(id -u)" -ne 0 ]]; then
         echo_error "Run this script as root or with sudo."
-        exit 1
+        return 1
     fi
+}
+
+exit_with_status() {
+    local status="$1"
+
+    if [[ "$status" -ne 0 && "$TOLERATE_FAILURES" == true ]]; then
+        echo_warn "setup-raw.sh failed with exit code ${status}; --tolerate-failures enabled, exiting 0."
+        exit 0
+    fi
+
+    exit "$status"
+}
+
+parse_tolerance_flag() {
+    local arg
+
+    for arg in "$@"; do
+        if [[ "$arg" == "--tolerate-failures" ]]; then
+            TOLERATE_FAILURES=true
+        fi
+    done
+}
+
+run_main() {
+    local status
+
+    set +e
+    (
+        set -Eeuo pipefail
+        main "$@"
+    )
+    status="$?"
+
+    exit_with_status "$status"
 }
 
 wait_for_apt_lock() {
@@ -82,7 +117,7 @@ wait_for_apt_lock() {
 
         if (( elapsed >= lock_wait_time )); then
             echo_error "Timeout waiting for apt/dpkg locks to be released."
-            exit 1
+            return 1
         fi
 
         sleep "$interval"
@@ -222,6 +257,9 @@ parse_args() {
             --skip-hostname-conf)
                 SKIP_HOSTNAME_CONF=true
                 ;;
+            --tolerate-failures)
+                TOLERATE_FAILURES=true
+                ;;
             skip_hostname_conf=*)
                 value="${arg#*=}"
                 case "$value" in
@@ -332,7 +370,7 @@ set_instance_hostname() {
 install_base_packages() {
     if ! command -v apt-get >/dev/null 2>&1; then
         echo_error "This raw installer currently supports apt-based Debian/Ubuntu instances."
-        exit 1
+        return 1
     fi
 
     echo_info "Installing base packages..."
@@ -397,7 +435,7 @@ wait_for_influxdb() {
     until influx ping >/dev/null 2>&1; do
         if (( elapsed >= timeout )); then
             echo_error "InfluxDB did not become available within ${timeout}s."
-            exit 1
+            return 1
         fi
         sleep "$interval"
         elapsed=$((elapsed + interval))
@@ -828,8 +866,8 @@ collect_hardware_metadata() {
 }
 
 main() {
-    require_root
     parse_args "$@"
+    require_root
     readonly HOSTID="$(detect_hostid)"
     export HOSTID DOMAIN_VALUE GRAFANA_SUBPATH
 
@@ -847,4 +885,5 @@ main() {
     echo_info "Raw metrics collector setup completed successfully."
 }
 
-main "$@"
+parse_tolerance_flag "$@"
+run_main "$@"
