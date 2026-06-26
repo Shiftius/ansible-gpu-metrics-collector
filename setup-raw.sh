@@ -166,6 +166,10 @@ apt_install_missing() {
     apt_install "${missing[@]}"
 }
 
+restore_tmp_permissions() {
+    chmod 1777 /tmp
+}
+
 download_file() {
     local url="$1"
     local dest="$2"
@@ -909,6 +913,7 @@ main() {
     configure_influxdb
     configure_telegraf
     configure_grafana
+    restore_tmp_permissions
 
     echo_info "Raw metrics collector setup completed successfully."
 }

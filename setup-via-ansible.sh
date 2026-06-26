@@ -43,6 +43,10 @@ exit_or_tolerate() {
     exit "$status"
 }
 
+restore_tmp_permissions() {
+    sudo chmod 1777 /tmp
+}
+
 run_main() {
     local status
 
@@ -179,8 +183,11 @@ ansible_status=$?
 set -e
 
 if [ "$ansible_status" -ne 0 ]; then
+    restore_tmp_permissions || true
     exit_or_tolerate "$ansible_status" "setup-via-ansible.sh"
 fi
+
+restore_tmp_permissions
 
 # Deactivate the virtual environment
 echo_info "Deactivating the virtual environment..."
