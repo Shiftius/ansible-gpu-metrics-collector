@@ -48,6 +48,9 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
 ```
 
 `setup-raw.sh` can still be invoked directly from a checkout or via curl when you do not need the compatibility wrapper.
+For compatibility with the former Ansible extra-vars flow, the raw installer accepts the existing setup values
+for `aws_timestream_*`, `environmentID`, `domain`, `host_prefix`, `skip_hostname_conf`, `influx.*`,
+`grafana.subpath`, `fleet_amd64_url`, `fleet_pkg_amd64`, `metadata_path`, and `metadata_backup`.
 
 #### Benchmarking Raw vs. Ansible Setup
 Use `reset-setup.sh` between runs to remove the metrics packages, generated config, repositories, local metrics data, and metadata created by either setup path.

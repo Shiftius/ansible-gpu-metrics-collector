@@ -33,6 +33,7 @@ INFLUX_ORG="${INFLUX_ORG:-lp}"
 INFLUX_PASSWORD="${INFLUX_PASSWORD:-LocaFluxCapacity2024}"
 INFLUX_USERNAME="${INFLUX_USERNAME:-lp}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
+METADATA_BACKUP="${METADATA_BACKUP:-${metadata_backup:-yes}}"
 SKIP_HOSTNAME_CONF=false
 # Failures are tolerated by default so parent bootstrap/orchestration scripts do
 # not fail closed if this metrics setup encounters an issue.
@@ -221,6 +222,17 @@ int_value() {
     fi
 }
 
+is_truthy() {
+    case "${1:-}" in
+        true|TRUE|True|yes|YES|Yes|y|Y|1)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 sysfs_first() {
     local default="$1"
     shift
@@ -336,6 +348,10 @@ parse_args() {
             metadata_path=*|METADATA_PATH=*)
                 value="${arg#*=}"
                 METADATA_PATH="$value"
+                ;;
+            metadata_backup=*|METADATA_BACKUP=*)
+                value="${arg#*=}"
+                METADATA_BACKUP="$value"
                 ;;
             fleet_amd64_url=*|FLEET_AMD64_URL=*)
                 value="${arg#*=}"
@@ -860,7 +876,9 @@ collect_hardware_metadata() {
     existing_metadata="{}"
     if [[ -f "$METADATA_PATH" ]]; then
         if jq -e . "$METADATA_PATH" >/dev/null 2>&1; then
-            cp "$METADATA_PATH" "${METADATA_PATH}.bak"
+            if is_truthy "$METADATA_BACKUP"; then
+                cp "$METADATA_PATH" "${METADATA_PATH}.bak"
+            fi
             existing_metadata="$(cat "$METADATA_PATH")"
         else
             cp "$METADATA_PATH" "${METADATA_PATH}.invalid"

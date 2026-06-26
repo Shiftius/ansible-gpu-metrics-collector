@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -Eeuo pipefail
 set +x
 
 # Failures are tolerated by default so parent benchmark/orchestration scripts do
@@ -34,12 +35,25 @@ exit_or_tolerate() {
     local status="$1"
     local script_name="$2"
 
-    if [ "$TOLERATE_FAILURES" = true ]; then
+    if [ "$status" -ne 0 ] && [ "$TOLERATE_FAILURES" = true ]; then
         echo_warn "${script_name} failed with exit code ${status}; failure tolerance enabled, exiting 0."
         exit 0
     fi
 
     exit "$status"
+}
+
+run_main() {
+    local status
+
+    set +e
+    (
+        set -Eeuo pipefail
+        main "$@"
+    )
+    status="$?"
+
+    exit_or_tolerate "$status" "setup-via-ansible.sh"
 }
 
 # Function to wait for apt lock to be free
@@ -64,7 +78,7 @@ wait_for_apt_lock() {
     echo_info "Apt lock is now free. Proceeding with package installation."
 }
 
-parse_tolerance_flag "$@"
+main() {
 
 # Update package lists and install prerequisites
 echo_info "Updating package lists and installing prerequisites..."
@@ -159,8 +173,10 @@ EXTRA_VARS_ARGS+=("skip_hostname_conf=$SKIP_HOSTNAME_CONF")
 
 # Run the Ansible playbook with logging and extra-vars
 echo_info "Running the Ansible playbook..."
+set +e
 ANSIBLE_LOG_PATH="$LOG_FILE" "$VENV_DIR/bin/ansible-playbook" -c local -i 'localhost,' -b playbook.yml --extra-vars "${EXTRA_VARS_ARGS[*]}"
 ansible_status=$?
+set -e
 
 if [ "$ansible_status" -ne 0 ]; then
     exit_or_tolerate "$ansible_status" "setup-via-ansible.sh"
@@ -171,6 +187,10 @@ echo_info "Deactivating the virtual environment..."
 deactivate
 
 echo_info "Ansible playbook execution completed successfully."
+}
+
+parse_tolerance_flag "$@"
+run_main "$@"
 
 # Sample call:
 # curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup-via-ansible.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
