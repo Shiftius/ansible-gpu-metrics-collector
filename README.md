@@ -2,26 +2,68 @@
 
 ## Security Notice
 
-This playbook handles sensitive AWS credentials and database passwords. The following security measures are implemented:
+This setup handles sensitive AWS credentials and database passwords. The following security measures are implemented:
 
 ### Security Features
 - **No Debug Output**: Shell scripts run with `set +x` to prevent command echoing
-- **No-Log Tasks**: Sensitive Ansible tasks use `no_log: true` to prevent credential exposure
+- **No Secret Echoing**: Sensitive values are written to protected config files without command tracing
 - **Secure File Permissions**: Configuration files containing secrets are created with restrictive permissions (0640)
 - **Environment Variables**: Secrets are passed via environment variables, not command-line arguments where possible
-- **Ansible Configuration**: Default settings prevent display of task arguments
+- **Legacy Ansible Path Preserved**: The playbook and roles remain available for inspection or manual use, but `setup.sh` now defaults to raw shell execution
 
 ### Best Practices
 1. **Never commit secrets** to version control
-2. **Use Ansible Vault** for encrypting sensitive variables:
-   ```bash
-   ansible-vault encrypt_string 'your-secret-key' --name 'aws_timestream_secret_key'
-   ```
+2. **Prefer environment variables** over command-line arguments for secrets
 3. **Limit log verbosity** in production environments
 4. **Rotate credentials** regularly
 5. **Use IAM roles** instead of access keys when running on AWS infrastructure
 
 ### Running Securely
+
+#### Default: Fast Raw Shell Setup
+For fresh instances where startup time matters, use `setup.sh`. It delegates to the flattened raw shell installer, leaves the Ansible playbook and roles in place, and skips Python, the Python virtualenv, and Ansible install work.
+When run from a checkout, `setup.sh` also uses local Grafana assets instead of fetching them over HTTP and installs the metrics packages plus the Fleet deb in a single apt transaction.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
+  bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+```
+
+To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
+
+Failure tolerance is enabled by default for parent orchestration: the scripts still log `[ERROR]` and `[WARN]`
+status output, but normalize failures to exit code `0`. Use `--strict-failures` only when you want a
+benchmark/debug run to exit nonzero on failure. `--tolerate-failures` is still accepted to explicitly request
+the default behavior.
+
+The raw installer also accepts environment variables, which keeps secrets out of the process arguments:
+
+```bash
+export AWS_TIMESTREAM_ACCESS_KEY="your-key"
+export AWS_TIMESTREAM_SECRET_KEY="your-secret"
+export AWS_TIMESTREAM_DATABASE="your-db"
+export ENVIRONMENT_ID="your-environment-id"
+
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash
+```
+
+`setup-raw.sh` can still be invoked directly from a checkout or via curl when you do not need the compatibility wrapper.
+For compatibility with the former Ansible extra-vars flow, the raw installer accepts the existing setup values
+for `aws_timestream_*`, `environmentID`, `domain`, `host_prefix`, `skip_hostname_conf`, `influx.*`,
+`grafana.subpath`, `fleet_amd64_url`, `fleet_pkg_amd64`, `metadata_path`, and `metadata_backup`.
+
+#### Benchmarking Raw vs. Ansible Setup
+Use `reset-setup.sh` between runs to remove the metrics packages, generated config, repositories, local metrics data, and metadata created by either setup path.
+
+```bash
+sudo ./reset-setup.sh --purge-benchmark-cache
+time ./setup-via-ansible.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+
+sudo ./reset-setup.sh --purge-benchmark-cache
+time ./setup.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+```
+
+For a data-preserving reset, use `sudo ./reset-setup.sh --keep-data`. The reset script does not restore the hostname.
 
 #### Method 1: Interactive Secure Input (RECOMMENDED)
 ```bash
@@ -38,7 +80,7 @@ export AWS_TIMESTREAM_ACCESS_KEY="your-key"
 export AWS_TIMESTREAM_SECRET_KEY="your-secret"
 export AWS_TIMESTREAM_DATABASE="your-db"
 
-# Run setup (will auto-detect env vars)
+# Run setup; it delegates to setup-raw.sh and auto-detects env vars
 ./setup.sh
 ```
 
@@ -58,18 +100,16 @@ To keep the current hostname unchanged, append `--skip-hostname-conf` to the `ba
 
 The scripts include multiple layers of security:
 
-1. **Debug Mode Detection**: Scripts will exit if run with `bash -x` or `sh -x`
+1. **Debug Mode Detection**: Scripts refuse `bash -x` or `sh -x` before doing work, while preserving the default tolerated exit behavior
 2. **Trace Protection**: Detects and blocks shell tracing (`set -x`)
 3. **History Disabled**: Command history is disabled during execution
-4. **Parameter Clearing**: Positional parameters are cleared after capture
-5. **Multiple Checkpoints**: Debug mode is disabled at multiple points
+4. **Environment Credential Flow**: Environment variables are supported to avoid putting secrets in command-line arguments
+5. **Secure Permissions**: Generated secret-bearing files are written with restrictive permissions
 
 ### Debugging Safely
 If you need to debug, use targeted verbosity:
 ```bash
-# Use -vv for moderate verbosity (some tasks still hidden)
-ansible-playbook -vv playbook.yml
-
-# Use -vvv only in secure environments (may expose secrets)
-ansible-playbook -vvv playbook.yml
+# setup.sh and setup-raw.sh emit high-level [INFO], [WARN], and [ERROR] status lines.
+# Avoid bash -x or set -x because both scripts intentionally refuse traced execution.
+./setup.sh
 ```
