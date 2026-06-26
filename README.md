@@ -100,7 +100,7 @@ To keep the current hostname unchanged, append `--skip-hostname-conf` to the `ba
 
 The scripts include multiple layers of security:
 
-1. **Debug Mode Detection**: Scripts will exit if run with `bash -x` or `sh -x`
+1. **Debug Mode Detection**: Scripts refuse `bash -x` or `sh -x` before doing work, while preserving the default tolerated exit behavior
 2. **Trace Protection**: Detects and blocks shell tracing (`set -x`)
 3. **History Disabled**: Command history is disabled during execution
 4. **Environment Credential Flow**: Environment variables are supported to avoid putting secrets in command-line arguments

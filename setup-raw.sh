@@ -2,7 +2,7 @@
 
 if [[ ${-} == *x* ]]; then
     echo "[ERROR] Do not run this script with shell tracing enabled; it can expose credentials." >&2
-    exit 1
+    exit 0
 fi
 
 set -Eeuo pipefail
