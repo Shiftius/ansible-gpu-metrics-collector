@@ -36,6 +36,17 @@ status output, but normalize failures to exit code `0`. Use `--strict-failures` 
 benchmark/debug run to exit nonzero on failure. `--tolerate-failures` is still accepted to explicitly request
 the default behavior.
 
+Use `--fleet-only` when an instance needs Fleet enrollment without the InfluxDB, Telegraf, and Grafana
+metrics stack or its package repositories:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
+  bash -s -- --fleet-only --skip-hostname-conf --strict-failures
+```
+
+In the default tolerant mode, a Fleet download or installation failure is logged and the command exits
+successfully. With `--strict-failures`, the same failure returns a nonzero exit code.
+
 The raw installer also accepts environment variables, which keeps secrets out of the process arguments:
 
 ```bash
