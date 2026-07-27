@@ -34,6 +34,7 @@ INFLUX_PASSWORD="${INFLUX_PASSWORD:-LocaFluxCapacity2024}"
 INFLUX_USERNAME="${INFLUX_USERNAME:-lp}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 METADATA_BACKUP="${METADATA_BACKUP:-${metadata_backup:-yes}}"
+FLEET_ONLY=false
 SKIP_HOSTNAME_CONF=false
 # Failures are tolerated by default so parent bootstrap/orchestration scripts do
 # not fail closed if this metrics setup encounters an issue.
@@ -277,6 +278,9 @@ parse_args() {
 
     for arg in "$@"; do
         case "$arg" in
+            --fleet-only)
+                FLEET_ONLY=true
+                ;;
             --skip-hostname-conf)
                 SKIP_HOSTNAME_CONF=true
                 ;;
@@ -404,7 +408,11 @@ install_base_packages() {
     fi
 
     echo_info "Installing base packages..."
-    apt_install_missing ca-certificates curl dmidecode gnupg jq lshw pciutils wget
+    if [[ "$FLEET_ONLY" == true ]]; then
+        apt_install_missing ca-certificates curl
+    else
+        apt_install_missing ca-certificates curl dmidecode gnupg jq lshw pciutils wget
+    fi
 }
 
 configure_repositories() {
@@ -439,15 +447,59 @@ configure_repositories() {
     apt_update
 }
 
+handle_fleet_install_failure() {
+    local message="$1"
+
+    if [[ "$TOLERATE_FAILURES" == true ]]; then
+        echo_warn "${message}; failure tolerance enabled, continuing without Fleet."
+        return 0
+    fi
+
+    echo_error "$message"
+    return 1
+}
+
+install_fleet_package() {
+    local pkg_path="/opt/${FLEET_PKG_AMD64}"
+
+    echo_info "Installing Fleet package..."
+    rm -f "$pkg_path"
+    if ! download_file "$FLEET_AMD64_URL" "$pkg_path" 0644; then
+        handle_fleet_install_failure "Fleet package download failed"
+        return
+    fi
+
+    if ! apt_install "$pkg_path"; then
+        handle_fleet_install_failure "Fleet package installation failed"
+    fi
+}
+
 install_metrics_packages() {
     local pkg_path="/opt/${FLEET_PKG_AMD64}"
 
     echo_info "Installing metrics packages..."
-    download_file "$FLEET_AMD64_URL" "$pkg_path" 0644
-    if ! apt_install grafana influxdb2 influxdb2-cli telegraf "$pkg_path"; then
-        echo_warn "Combined metrics and fleet package install failed; retrying metrics packages without fleet."
+    if ! download_file "$FLEET_AMD64_URL" "$pkg_path" 0644; then
+        if [[ "$TOLERATE_FAILURES" == false ]]; then
+            echo_error "Fleet package download failed."
+            return 1
+        fi
+
+        echo_warn "Fleet package download failed; installing metrics packages without Fleet."
         apt_install grafana influxdb2 influxdb2-cli telegraf
+        return
     fi
+
+    if apt_install grafana influxdb2 influxdb2-cli telegraf "$pkg_path"; then
+        return
+    fi
+
+    if [[ "$TOLERATE_FAILURES" == false ]]; then
+        echo_error "Combined metrics and Fleet package installation failed."
+        return 1
+    fi
+
+    echo_warn "Combined metrics and Fleet package install failed; retrying metrics packages without Fleet."
+    apt_install grafana influxdb2 influxdb2-cli telegraf
 }
 
 systemctl_enable_restart() {
@@ -907,6 +959,14 @@ main() {
 
     install_base_packages
     set_instance_hostname "$HOSTID"
+
+    if [[ "$FLEET_ONLY" == true ]]; then
+        install_fleet_package
+        restore_tmp_permissions
+        echo_info "Fleet-only setup completed successfully."
+        return
+    fi
+
     collect_hardware_metadata || echo_warn "Hardware metadata collection failed; continuing."
     configure_repositories
     install_metrics_packages
