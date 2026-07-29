@@ -1,8 +1,21 @@
 ---
+- name: Validate Fleet package architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture in ["x86_64", "aarch64"]
+    fail_msg: "No Fleet package is configured for {{ ansible_architecture }}"
+  tags: packages
+
+- name: Select Fleet package
+  ansible.builtin.set_fact:
+    fleet_selected_url: "{{ fleet_arm64_url if ansible_architecture == 'aarch64' else fleet_amd64_url }}"
+    fleet_selected_pkg: "{{ fleet_pkg_arm64 if ansible_architecture == 'aarch64' else fleet_pkg_amd64 }}"
+  tags: packages
+
 - name: Download pkg
   get_url:
-    url: "{{ fleet_amd64_url }}"
-    dest: "/opt/{{ fleet_pkg_amd64 }}"
+    url: "{{ fleet_selected_url }}"
+    dest: "/opt/{{ fleet_selected_pkg }}"
     mode: "0644"
   tags: packages
   ignore_errors: true
@@ -10,8 +23,7 @@
 
 - name: Install pkg
   ansible.builtin.apt:
-    deb: "/opt/{{ fleet_pkg_amd64 }}"
+    deb: "/opt/{{ fleet_selected_pkg }}"
   tags: packages
   ignore_errors: true
   no_log: true
-
