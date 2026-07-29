@@ -11,6 +11,7 @@ REFRESH_APT=false
 TOLERATE_FAILURES=true
 FLEET_PACKAGE_NAME="${FLEET_PACKAGE_NAME:-fleet-osquery}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-fleet-1.0.0_amd64.deb}"
+FLEET_PKG_ARM64="${FLEET_PKG_ARM64:-fleet-1.0.0_arm64.deb}"
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 TEMP_INFLUXDB_UNIT_CREATED=false
 TEMP_INFLUXDB_UNIT_PATH="/etc/systemd/system/influxdb.service"
@@ -284,7 +285,8 @@ remove_config_and_data() {
         /etc/grafana \
         /etc/influxdb \
         /etc/influxdb2 \
-        "/opt/${FLEET_PKG_AMD64}"
+        "/opt/${FLEET_PKG_AMD64}" \
+        "/opt/${FLEET_PKG_ARM64}"
 
     if [[ "$PURGE_DATA" == true ]]; then
         echo_info "Removing generated metrics data and metadata..."

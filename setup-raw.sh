@@ -13,6 +13,8 @@ export HISTFILE=/dev/null
 readonly DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main"
 readonly DEFAULT_FLEET_AMD64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/f2a389a0c40047587c32daafd34d407bc130075f8d29decf2c0aad5f60464043"
 readonly DEFAULT_FLEET_PKG_AMD64="fleet-1.0.0_amd64.deb"
+readonly DEFAULT_FLEET_ARM64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/80c7434e73e1c5dff018a8a8c21ed464446cb7d25170b5644ebef84805ac6edb"
+readonly DEFAULT_FLEET_PKG_ARM64="fleet-1.0.0_arm64.deb"
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd || true)"
@@ -26,6 +28,10 @@ DOMAIN_VALUE="${DOMAIN:-${domain:-domain.com}}"
 ENVIRONMENT_ID_VALUE="${ENVIRONMENT_ID:-${environmentID:-}}"
 FLEET_AMD64_URL="${FLEET_AMD64_URL:-${fleet_amd64_url:-$DEFAULT_FLEET_AMD64_URL}}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-${fleet_pkg_amd64:-$DEFAULT_FLEET_PKG_AMD64}}"
+FLEET_ARM64_URL="${FLEET_ARM64_URL:-${fleet_arm64_url:-$DEFAULT_FLEET_ARM64_URL}}"
+FLEET_PKG_ARM64="${FLEET_PKG_ARM64:-${fleet_pkg_arm64:-$DEFAULT_FLEET_PKG_ARM64}}"
+SELECTED_FLEET_URL=""
+SELECTED_FLEET_PKG=""
 GRAFANA_SUBPATH="${GRAFANA_SUBPATH:-metrics}"
 HOST_PREFIX="${HOST_PREFIX:-brev}"
 INFLUX_BUCKET="${INFLUX_BUCKET:-lp}"
@@ -369,6 +375,14 @@ parse_args() {
                 value="${arg#*=}"
                 FLEET_PKG_AMD64="$value"
                 ;;
+            fleet_arm64_url=*|FLEET_ARM64_URL=*)
+                value="${arg#*=}"
+                FLEET_ARM64_URL="$value"
+                ;;
+            fleet_pkg_arm64=*|FLEET_PKG_ARM64=*)
+                value="${arg#*=}"
+                FLEET_PKG_ARM64="$value"
+                ;;
             *)
                 echo_warn "Ignoring unsupported argument: ${arg%%=*}"
                 ;;
@@ -459,12 +473,49 @@ handle_fleet_install_failure() {
     return 1
 }
 
+detect_debian_architecture() {
+    if command -v dpkg >/dev/null 2>&1; then
+        dpkg --print-architecture
+        return
+    fi
+
+    printf 'unknown\n'
+}
+
+select_fleet_package() {
+    local architecture
+
+    architecture="$(detect_debian_architecture)"
+    case "$architecture" in
+        amd64)
+            SELECTED_FLEET_URL="$FLEET_AMD64_URL"
+            SELECTED_FLEET_PKG="$FLEET_PKG_AMD64"
+            ;;
+        arm64)
+            SELECTED_FLEET_URL="$FLEET_ARM64_URL"
+            SELECTED_FLEET_PKG="$FLEET_PKG_ARM64"
+            ;;
+        *)
+            echo_error "Unsupported Fleet package architecture: ${architecture}"
+            return 1
+            ;;
+    esac
+
+    echo_info "Using Fleet package for ${architecture}: ${SELECTED_FLEET_PKG}"
+}
+
 install_fleet_package() {
-    local pkg_path="/opt/${FLEET_PKG_AMD64}"
+    local pkg_path
 
     echo_info "Installing Fleet package..."
+    if ! select_fleet_package; then
+        handle_fleet_install_failure "Fleet package selection failed"
+        return
+    fi
+
+    pkg_path="/opt/${SELECTED_FLEET_PKG}"
     rm -f "$pkg_path"
-    if ! download_file "$FLEET_AMD64_URL" "$pkg_path" 0644; then
+    if ! download_file "$SELECTED_FLEET_URL" "$pkg_path" 0644; then
         handle_fleet_install_failure "Fleet package download failed"
         return
     fi
@@ -475,10 +526,21 @@ install_fleet_package() {
 }
 
 install_metrics_packages() {
-    local pkg_path="/opt/${FLEET_PKG_AMD64}"
+    local pkg_path
 
     echo_info "Installing metrics packages..."
-    if ! download_file "$FLEET_AMD64_URL" "$pkg_path" 0644; then
+    if ! select_fleet_package; then
+        if [[ "$TOLERATE_FAILURES" == false ]]; then
+            return 1
+        fi
+
+        echo_warn "Fleet package selection failed; installing metrics packages without Fleet."
+        apt_install grafana influxdb2 influxdb2-cli telegraf
+        return
+    fi
+
+    pkg_path="/opt/${SELECTED_FLEET_PKG}"
+    if ! download_file "$SELECTED_FLEET_URL" "$pkg_path" 0644; then
         if [[ "$TOLERATE_FAILURES" == false ]]; then
             echo_error "Fleet package download failed."
             return 1

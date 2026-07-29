@@ -11,10 +11,60 @@ sed '/^parse_tolerance_flag "\$@"/,$d' "${repo_root}/setup-raw.sh" > "$library_c
 # shellcheck source=/dev/null
 source "$library_copy"
 FLEET_PKG_AMD64="../tmp/$(basename "$test_fleet_package")"
+detect_debian_architecture() { printf 'amd64\n'; }
 
 fail() {
     echo "FAIL: $*" >&2
     exit 1
+}
+
+test_fleet_package_selection() {
+    (
+        detect_debian_architecture() { printf 'amd64\n'; }
+        select_fleet_package
+        [[ "$SELECTED_FLEET_URL" == "$FLEET_AMD64_URL" ]] \
+            || fail "amd64 selected the wrong Fleet URL"
+        [[ "$SELECTED_FLEET_PKG" == "$FLEET_PKG_AMD64" ]] \
+            || fail "amd64 selected the wrong Fleet package"
+    )
+
+    (
+        detect_debian_architecture() { printf 'arm64\n'; }
+        select_fleet_package
+        [[ "$SELECTED_FLEET_URL" == "$FLEET_ARM64_URL" ]] \
+            || fail "arm64 selected the wrong Fleet URL"
+        [[ "$SELECTED_FLEET_PKG" == "$FLEET_PKG_ARM64" ]] \
+            || fail "arm64 selected the wrong Fleet package"
+    )
+
+    (
+        detect_debian_architecture() { printf 'riscv64\n'; }
+        if select_fleet_package; then
+            fail "unsupported architecture selected a Fleet package"
+        fi
+    )
+}
+
+test_arm64_install_uses_arm_package() {
+    local trace
+    local test_arm64_package
+    trace="$(mktemp)"
+    test_arm64_package="../tmp/$(basename "$test_fleet_package")"
+
+    (
+        detect_debian_architecture() { printf 'arm64\n'; }
+        FLEET_PKG_ARM64="$test_arm64_package"
+        download_file() { printf 'download %s %s %s\n' "$@" >> "$trace"; }
+        apt_install() { printf 'install %s\n' "$*" >> "$trace"; }
+
+        install_fleet_package
+    )
+
+    [[ "$(sed -n '1p' "$trace")" == "download ${FLEET_ARM64_URL} /opt/${test_arm64_package} 0644" ]] \
+        || fail "arm64 install used the wrong Fleet download"
+    [[ "$(sed -n '2p' "$trace")" == "install /opt/${test_arm64_package}" ]] \
+        || fail "arm64 install used the wrong Fleet package path"
+    rm -f "$trace"
 }
 
 test_fleet_failure_is_tolerated_by_default() {
@@ -191,6 +241,8 @@ test_full_setup_retains_metrics_stack() {
     rm -f "$trace"
 }
 
+test_fleet_package_selection
+test_arm64_install_uses_arm_package
 test_fleet_failure_is_tolerated_by_default
 test_fleet_failure_is_strict_when_requested
 test_fleet_install_failure_respects_tolerance_mode
