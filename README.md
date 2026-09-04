@@ -2,7 +2,7 @@
 
 ## Security Notice
 
-This setup handles sensitive AWS credentials and database passwords. The following security measures are implemented:
+This setup handles sensitive Fleet enrollment and metrics credentials. The following security measures are implemented:
 
 ### Security Features
 - **No Debug Output**: Shell scripts run with `set +x` to prevent command echoing
@@ -24,10 +24,25 @@ This setup handles sensitive AWS credentials and database passwords. The followi
 For fresh instances where startup time matters, use `setup.sh`. It delegates to the flattened raw shell installer, leaves the Ansible playbook and roles in place, and skips Python, the Python virtualenv, and Ansible install work.
 When run from a checkout, `setup.sh` also uses local Grafana assets instead of fetching them over HTTP and installs the metrics packages plus the Fleet deb in a single apt transaction. The installer detects the Debian package architecture and selects the matching AMD64 or ARM64 Fleet package.
 
+Fleet remains optional for Brev. Set both `ORBIT_FLEET_URL` and
+`ORBIT_ENROLL_SECRET` to request enrollment. Missing values, download failures,
+installation failures, or registration failures warn and continue by default.
+The secret is copied to a root-only file below `/run`, removed after enrollment,
+and Orbit is restarted using its node key. It is never retained in
+`/etc/default/orbit`; UUID remains the implicit host identifier.
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
-  bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+export ORBIT_FLEET_URL='https://fleet.example.com'
+export ORBIT_ENROLL_SECRET='SECRET'
+export environmentID='ID'
+curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash
 ```
+
+The configless Orbit 1.35.0 packages are checksum-pinned. Package installation
+does not start Orbit; the installer explicitly enables and starts
+`orbit.service` only after runtime enrollment configuration exists. The service
+remains enabled after the transient enrollment file and systemd drop-in are
+removed.
 
 To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
 

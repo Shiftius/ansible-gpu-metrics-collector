@@ -139,5 +139,5 @@ parse_wrapper_args "$@"
 run_main "$@"
 
 # Sample call:
-# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
+# Export ORBIT_FLEET_URL, ORBIT_ENROLL_SECRET, and environmentID before piping this script to bash.
 # Add --skip-hostname-conf to preserve the current hostname.
