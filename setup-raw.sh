@@ -20,10 +20,6 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd || true)"
 ASSET_BASE_URL="${ASSET_BASE_URL:-$DEFAULT_ASSET_BASE_URL}"
 ASSET_DIR="${ASSET_DIR:-}"
-AWS_REGION_VALUE="${AWS_REGION:-${aws_region:-us-west-2}}"
-AWS_TIMESTREAM_ACCESS_KEY_VALUE="${AWS_TIMESTREAM_ACCESS_KEY:-${aws_timestream_access_key:-empty-access-key}}"
-AWS_TIMESTREAM_SECRET_KEY_VALUE="${AWS_TIMESTREAM_SECRET_KEY:-${aws_timestream_secret_key:-empty-secret-key}}"
-AWS_TIMESTREAM_DATABASE_VALUE="${AWS_TIMESTREAM_DATABASE:-${aws_timestream_database:-empty-database}}"
 DOMAIN_VALUE="${DOMAIN:-${domain:-domain.com}}"
 ENVIRONMENT_ID_VALUE="${ENVIRONMENT_ID:-${environmentID:-}}"
 FLEET_AMD64_URL="${FLEET_AMD64_URL:-${fleet_amd64_url:-$DEFAULT_FLEET_AMD64_URL}}"
@@ -36,8 +32,12 @@ GRAFANA_SUBPATH="${GRAFANA_SUBPATH:-metrics}"
 HOST_PREFIX="${HOST_PREFIX:-brev}"
 INFLUX_BUCKET="${INFLUX_BUCKET:-lp}"
 INFLUX_ORG="${INFLUX_ORG:-lp}"
-INFLUX_PASSWORD="${INFLUX_PASSWORD:-LocaFluxCapacity2024}"
 INFLUX_USERNAME="${INFLUX_USERNAME:-lp}"
+METRICS_SECRETS_FILE="${METRICS_SECRETS_FILE:-/etc/brev/metrics-secrets.env}"
+INFLUX_ADMIN_PASSWORD=""
+INFLUX_OPERATOR_TOKEN=""
+INFLUX_V1_PASSWORD=""
+GRAFANA_ADMIN_PASSWORD=""
 METADATA_PATH="${METADATA_PATH:-/etc/brev/metadata.json}"
 METADATA_BACKUP="${METADATA_BACKUP:-${metadata_backup:-yes}}"
 FLEET_ONLY=false
@@ -311,22 +311,6 @@ parse_args() {
                 value="${arg#*=}"
                 ASSET_BASE_URL="$value"
                 ;;
-            aws_region=*|AWS_REGION=*)
-                value="${arg#*=}"
-                AWS_REGION_VALUE="$value"
-                ;;
-            aws_timestream_access_key=*|AWS_TIMESTREAM_ACCESS_KEY=*)
-                value="${arg#*=}"
-                AWS_TIMESTREAM_ACCESS_KEY_VALUE="$value"
-                ;;
-            aws_timestream_secret_key=*|AWS_TIMESTREAM_SECRET_KEY=*)
-                value="${arg#*=}"
-                AWS_TIMESTREAM_SECRET_KEY_VALUE="$value"
-                ;;
-            aws_timestream_database=*|AWS_TIMESTREAM_DATABASE=*)
-                value="${arg#*=}"
-                AWS_TIMESTREAM_DATABASE_VALUE="$value"
-                ;;
             environmentID=*|ENVIRONMENT_ID=*)
                 value="${arg#*=}"
                 ENVIRONMENT_ID_VALUE="$value"
@@ -350,10 +334,6 @@ parse_args() {
             influx.org=*|influx_org=*|INFLUX_ORG=*)
                 value="${arg#*=}"
                 INFLUX_ORG="$value"
-                ;;
-            influx.password=*|influx_password=*|INFLUX_PASSWORD=*)
-                value="${arg#*=}"
-                INFLUX_PASSWORD="$value"
                 ;;
             influx.username=*|influx_username=*|INFLUX_USERNAME=*)
                 value="${arg#*=}"
@@ -586,25 +566,95 @@ wait_for_influxdb() {
     done
 }
 
-configure_influxdb() {
-    local bucket_id auth_id
+random_local_secret() {
+    od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
+}
 
-    echo_info "Starting InfluxDB..."
+validate_metrics_secrets() {
+    local secret_value unique_count
+
+    for secret_value in \
+        "$INFLUX_ADMIN_PASSWORD" \
+        "$INFLUX_OPERATOR_TOKEN" \
+        "$INFLUX_V1_PASSWORD" \
+        "$GRAFANA_ADMIN_PASSWORD"; do
+        [[ "$secret_value" =~ ^[0-9a-f]{48}$ ]] || {
+            echo_error "Invalid value in ${METRICS_SECRETS_FILE}."
+            return 1
+        }
+    done
+
+    unique_count="$(printf '%s\n' \
+        "$INFLUX_ADMIN_PASSWORD" \
+        "$INFLUX_OPERATOR_TOKEN" \
+        "$INFLUX_V1_PASSWORD" \
+        "$GRAFANA_ADMIN_PASSWORD" \
+        | sort -u | wc -l | tr -d ' ')"
+    if [[ "$unique_count" -ne 4 ]]; then
+        echo_error "Metrics credentials in ${METRICS_SECRETS_FILE} must be independent."
+        return 1
+    fi
+}
+
+load_or_create_metrics_secrets() {
+    local setup_allowed secrets_dir secrets_tmp
+
+    secrets_dir="$(dirname "$METRICS_SECRETS_FILE")"
+    install -d -m 0700 -o root -g root "$secrets_dir"
+
     systemctl enable influxdb
     systemctl start influxdb
     wait_for_influxdb
 
+    if [[ ! -f "$METRICS_SECRETS_FILE" ]]; then
+        setup_allowed="$(curl -fsS http://127.0.0.1:8086/api/v2/setup | jq -r '.allowed')"
+        if [[ "$setup_allowed" != true ]]; then
+            echo_error "InfluxDB is already initialized but ${METRICS_SECRETS_FILE} is absent; refusing to rotate existing credentials."
+            return 1
+        fi
+
+        INFLUX_ADMIN_PASSWORD="$(random_local_secret)"
+        INFLUX_OPERATOR_TOKEN="$(random_local_secret)"
+        INFLUX_V1_PASSWORD="$(random_local_secret)"
+        GRAFANA_ADMIN_PASSWORD="$(random_local_secret)"
+        secrets_tmp="$(mktemp "${secrets_dir}/.metrics-secrets.XXXXXX")"
+        chmod 0600 "$secrets_tmp"
+        printf '%s\n' \
+            "INFLUX_ADMIN_PASSWORD=${INFLUX_ADMIN_PASSWORD}" \
+            "INFLUX_OPERATOR_TOKEN=${INFLUX_OPERATOR_TOKEN}" \
+            "INFLUX_V1_PASSWORD=${INFLUX_V1_PASSWORD}" \
+            "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}" \
+            > "$secrets_tmp"
+        chown root:root "$secrets_tmp"
+        mv "$secrets_tmp" "$METRICS_SECRETS_FILE"
+    fi
+
+    if [[ "$(stat -c '%U:%G:%a' "$METRICS_SECRETS_FILE")" != root:root:600 ]]; then
+        echo_error "${METRICS_SECRETS_FILE} must be owned by root:root with mode 0600."
+        return 1
+    fi
+
+    # The file contains only locally generated hexadecimal values and is root-owned.
+    # shellcheck disable=SC1090
+    source "$METRICS_SECRETS_FILE"
+    validate_metrics_secrets
+}
+
+configure_influxdb() {
+    local bucket_id auth_id
+
+    echo_info "Starting InfluxDB..."
     bucket_id="$(influx bucket list 2>/dev/null | awk -v bucket="$INFLUX_BUCKET" '$0 ~ bucket {print $1; exit}' || true)"
     if [[ -z "$bucket_id" ]]; then
         echo_info "Creating InfluxDB organization, bucket, and admin token..."
         influx setup \
             --name default \
             --username "$INFLUX_USERNAME" \
-            --password "$INFLUX_PASSWORD" \
+            --password "$INFLUX_ADMIN_PASSWORD" \
             --org "$INFLUX_ORG" \
             --bucket "$INFLUX_BUCKET" \
             --retention 30d \
-            --token "$INFLUX_PASSWORD" \
+            --token "$INFLUX_OPERATOR_TOKEN" \
             --force >/dev/null
         bucket_id="$(influx bucket list 2>/dev/null | awk -v bucket="$INFLUX_BUCKET" '$0 ~ bucket {print $1; exit}' || true)"
     fi
@@ -614,7 +664,7 @@ configure_influxdb() {
         echo_info "Creating InfluxDB v1 compatibility auth..."
         influx v1 auth create \
             --username "$INFLUX_USERNAME" \
-            --password "$INFLUX_PASSWORD" \
+            --password "$INFLUX_V1_PASSWORD" \
             --org "$INFLUX_ORG" \
             --read-bucket "$bucket_id" >/dev/null
     else
@@ -630,10 +680,6 @@ configure_telegraf() {
 
     cat > /etc/default/telegraf <<EOF
 LP_STACK_NAME="${HOSTID}"
-AWS_REGION="${AWS_REGION_VALUE}"
-AWS_ACCESS_KEY="${AWS_TIMESTREAM_ACCESS_KEY_VALUE}"
-AWS_SECRET_KEY="${AWS_TIMESTREAM_SECRET_KEY_VALUE}"
-AWS_TIMESTREAM_DB="${AWS_TIMESTREAM_DATABASE_VALUE}"
 EOF
     chown telegraf:telegraf /etc/default/telegraf
     chmod 0640 /etc/default/telegraf
@@ -672,21 +718,9 @@ EOF
   pattern = "cloudflared"
 
 ## Configure Telegraf Outputs
-[[outputs.timestream]]
-  region = "\${AWS_REGION}"
-  access_key = "\${AWS_ACCESS_KEY}"
-  secret_key = "\${AWS_SECRET_KEY}"
-  database_name = "\${AWS_TIMESTREAM_DB}"
-  describe_database_on_start = false
-  mapping_mode = "multi-table"
-  create_table_if_not_exists = true
-  create_table_magnetic_store_retention_period_in_days = 365
-  create_table_memory_store_retention_period_in_hours = 24
-
-
 [[outputs.influxdb_v2]]
   urls = ["http://127.0.0.1:8086"]
-  token = "${INFLUX_PASSWORD}"
+  token = "${INFLUX_OPERATOR_TOKEN}"
   organization = "${INFLUX_ORG}"
   bucket = "${INFLUX_BUCKET}"
 EOF
@@ -711,6 +745,7 @@ render_grafana_ini() {
         -e "s@{{ hostid }}@${hostid}@g" \
         -e "s@{{ domain }}@${domain}@g" \
         -e "s@{{ grafana.subpath }}@${subpath}@g" \
+        -e "s@^;admin_password = admin$@admin_password = ${GRAFANA_ADMIN_PASSWORD}@" \
         "$template_file" > "$output_file"
 }
 
@@ -747,8 +782,11 @@ datasources:
       dbName: ${INFLUX_BUCKET}
       httpMode: GET
     secureJsonData:
-      password: ${INFLUX_PASSWORD}
+      password: ${INFLUX_V1_PASSWORD}
 EOF
+
+    chown root:grafana /etc/grafana/provisioning/datasources/graf_ds.yaml
+    chmod 0640 /etc/grafana/provisioning/datasources/graf_ds.yaml
 
     cat > /etc/grafana/provisioning/dashboards/graf_dash.yaml <<'EOF'
 apiVersion: 1
@@ -1032,6 +1070,7 @@ main() {
     collect_hardware_metadata || echo_warn "Hardware metadata collection failed; continuing."
     configure_repositories
     install_metrics_packages
+    load_or_create_metrics_secrets
     configure_influxdb
     configure_telegraf
     configure_grafana

@@ -200,5 +200,5 @@ parse_tolerance_flag "$@"
 run_main "$@"
 
 # Sample call:
-# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup-via-ansible.sh | bash -s -- aws_timestream_access_key='' aws_timestream_secret_key='' aws_timestream_database='' environmentID=''
+# curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup-via-ansible.sh | bash -s -- environmentID=''
 # Add --skip-hostname-conf to preserve the current hostname.
