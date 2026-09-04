@@ -228,6 +228,7 @@ test_full_setup_retains_metrics_stack() {
         collect_hardware_metadata() { echo metadata >> "$trace"; }
         configure_repositories() { echo repositories >> "$trace"; }
         install_metrics_packages() { echo metrics >> "$trace"; }
+        load_or_create_metrics_secrets() { echo secrets >> "$trace"; }
         configure_influxdb() { echo influxdb >> "$trace"; }
         configure_telegraf() { echo telegraf >> "$trace"; }
         configure_grafana() { echo grafana >> "$trace"; }
@@ -236,9 +237,43 @@ test_full_setup_retains_metrics_stack() {
         main
     )
 
-    [[ "$(cat "$trace")" == $'base\nhostname\nmetadata\nrepositories\nmetrics\ninfluxdb\ntelegraf\ngrafana\ntmp' ]] \
+    [[ "$(cat "$trace")" == $'base\nhostname\nmetadata\nrepositories\nmetrics\nsecrets\ninfluxdb\ntelegraf\ngrafana\ntmp' ]] \
         || fail "Full setup omitted or reordered required steps: $(tr '\n' ' ' < "$trace")"
     rm -f "$trace"
+}
+
+test_metrics_credentials_are_independent_and_local_only() {
+    local first second third fourth
+
+    first="$(random_local_secret)"
+    second="$(random_local_secret)"
+    third="$(random_local_secret)"
+    fourth="$(random_local_secret)"
+    [[ "$first" =~ ^[0-9a-f]{48}$ ]] || fail "Generated credential has unexpected format"
+    [[ "$(printf '%s\n' "$first" "$second" "$third" "$fourth" | sort -u | wc -l | tr -d ' ')" == 4 ]] \
+        || fail "Generated metrics credentials are not independent"
+
+    ! grep -R -q 'LocaFluxCapacity2024' \
+        "${repo_root}/setup-raw.sh" \
+        "${repo_root}/playbook.yml" \
+        "${repo_root}/roles/telegraf_config" \
+        || fail "Fixed legacy metrics password remains in an install path"
+    ! grep -Eq 'outputs\.timestream|AWS_(ACCESS_KEY|SECRET_KEY|TIMESTREAM_DB)' "${repo_root}/setup-raw.sh" \
+        || fail "Raw installer still configures Timestream or AWS credentials"
+    grep -q 'METRICS_SECRETS_FILE="${METRICS_SECRETS_FILE:-/etc/brev/metrics-secrets.env}"' "${repo_root}/setup-raw.sh" \
+        || fail "Raw installer does not persist new-host local credentials"
+
+    INFLUX_ADMIN_PASSWORD="$first"
+    INFLUX_OPERATOR_TOKEN="$second"
+    INFLUX_V1_PASSWORD="$third"
+    GRAFANA_ADMIN_PASSWORD="$fourth"
+    validate_metrics_secrets \
+        || fail "Raw installer rejected four independent credentials"
+
+    GRAFANA_ADMIN_PASSWORD="$first"
+    if validate_metrics_secrets >/dev/null 2>&1; then
+        fail "Raw installer accepted duplicate credentials"
+    fi
 }
 
 test_fleet_package_selection
@@ -251,5 +286,6 @@ test_combined_install_failure_respects_tolerance_mode
 test_full_setup_fleet_download_failure_respects_tolerance_mode
 test_fleet_only_skips_metrics_stack
 test_full_setup_retains_metrics_stack
+test_metrics_credentials_are_independent_and_local_only
 
 echo "PASS: setup-raw mode and Fleet failure handling"

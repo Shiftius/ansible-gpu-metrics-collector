@@ -16,5 +16,4 @@ datasources:
       dbName: {{ influx.bucket }}
       httpMode: GET
     secureJsonData:
-      password: {{ influx.password }}
-
+      password: {{ metrics_secrets.INFLUX_V1_PASSWORD }}

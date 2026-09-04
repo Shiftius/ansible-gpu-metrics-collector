@@ -1,7 +1,7 @@
 Role Name
 =========
 
-Install and Configure Telegraf with outputs for local InfluxDB and remote AWS Timestream backends
+Install and configure Telegraf with a local InfluxDB backend and independent per-host credentials.
 
 Requirements
 ------------
@@ -35,7 +35,6 @@ Including an example of how to use your role (for instance, with variables passe
       org: lp
       bucket: lp
       username: lp
-      password: LocaFluxCapacity2024
     grafana:
       subpath: 'metrics'
   roles:

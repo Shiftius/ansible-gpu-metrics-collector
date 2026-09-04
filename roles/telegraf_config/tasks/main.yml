@@ -86,6 +86,101 @@
   until: apt_4 is success
   tags: packages
 
+### Generate new-host-only local credentials
+
+- name: Prepare local metrics credential storage
+  file:
+    path: /etc/brev
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check for persisted local metrics credentials
+  stat:
+    path: /etc/brev/metrics-secrets.env
+  register: metrics_secrets_file
+
+- name: Start InfluxDB before checking initialization state
+  service:
+    name: influxdb
+    state: started
+    enabled: yes
+
+- name: Wait for the InfluxDB setup endpoint
+  uri:
+    url: http://127.0.0.1:8086/api/v2/setup
+    return_content: true
+  register: influx_setup_state
+  retries: 45
+  delay: 2
+  until: influx_setup_state.status == 200
+
+- name: Refuse automatic credential changes on an initialized host
+  fail:
+    msg: >-
+      InfluxDB is already initialized but /etc/brev/metrics-secrets.env is absent.
+      Refusing to rotate or replace credentials on an existing host.
+  when:
+    - not metrics_secrets_file.stat.exists
+    - not (influx_setup_state.json.allowed | bool)
+
+- name: Generate independent local credentials for a new host
+  shell: |
+    set -euo pipefail
+    umask 077
+    secret_file=/etc/brev/metrics-secrets.env
+    secret_tmp=$(mktemp /etc/brev/.metrics-secrets.XXXXXX)
+    random_secret() {
+      od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
+    }
+    printf '%s\n' \
+      "INFLUX_ADMIN_PASSWORD=$(random_secret)" \
+      "INFLUX_OPERATOR_TOKEN=$(random_secret)" \
+      "INFLUX_V1_PASSWORD=$(random_secret)" \
+      "GRAFANA_ADMIN_PASSWORD=$(random_secret)" \
+      > "$secret_tmp"
+    chown root:root "$secret_tmp"
+    chmod 0600 "$secret_tmp"
+    mv "$secret_tmp" "$secret_file"
+  args:
+    executable: /bin/bash
+    creates: /etc/brev/metrics-secrets.env
+  no_log: true
+
+- name: Verify local metrics credential file protection
+  stat:
+    path: /etc/brev/metrics-secrets.env
+  register: metrics_secrets_file_verified
+  failed_when: >-
+    not metrics_secrets_file_verified.stat.exists
+    or metrics_secrets_file_verified.stat.pw_name != 'root'
+    or metrics_secrets_file_verified.stat.gr_name != 'root'
+    or metrics_secrets_file_verified.stat.mode != '0600'
+
+- name: Read local metrics credentials
+  slurp:
+    src: /etc/brev/metrics-secrets.env
+  register: metrics_secrets_content
+  no_log: true
+
+- name: Parse local metrics credentials
+  set_fact:
+    metrics_secrets: >-
+      {{ dict((metrics_secrets_content.content | b64decode)
+              | regex_findall('(?m)^([A-Z0-9_]+)=([0-9a-f]+)$')) }}
+  no_log: true
+
+- name: Validate independent local metrics credentials
+  assert:
+    that:
+      - metrics_secrets.INFLUX_ADMIN_PASSWORD | length == 48
+      - metrics_secrets.INFLUX_OPERATOR_TOKEN | length == 48
+      - metrics_secrets.INFLUX_V1_PASSWORD | length == 48
+      - metrics_secrets.GRAFANA_ADMIN_PASSWORD | length == 48
+      - metrics_secrets.values() | unique | length == 4
+  no_log: true
+
 ### Configure influxdb2
 
 - name: Configure influxdb
@@ -100,14 +195,14 @@
     - name: Setup influxdb2 user
       shell: |
         INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
-        [ -z "$INFLUX_BUCKET_ID" ] && influx setup --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --bucket {{ influx.bucket }} --retention 30d --token {{ influx.password }} -force || echo "Bucket found with ID ${INFLUX_BUCKET_ID}"
+        [ -z "$INFLUX_BUCKET_ID" ] && influx setup --username {{ influx.username }} --password {{ metrics_secrets.INFLUX_ADMIN_PASSWORD }} --org {{ influx.org }} --bucket {{ influx.bucket }} --retention 30d --token {{ metrics_secrets.INFLUX_OPERATOR_TOKEN }} -force || echo "Bucket found with ID ${INFLUX_BUCKET_ID}"
       no_log: true # Prevent logging of sensitive credentials
 
     - name: Setup influxdb1 user
       shell: |
         INFLUX_BUCKET_ID=`influx bucket list | grep {{ influx.bucket }} | awk '{print($1)}'`
         INFLUX_AUTH_ID=`influx v1 auth list | grep {{ influx.bucket }} | awk '{print($1)}'`
-        [ -z "$INFLUX_AUTH_ID" ] && influx v1 auth create --username {{ influx.username }} --password {{ influx.password }} --org {{ influx.org }} --read-bucket ${INFLUX_BUCKET_ID} || echo "Auth found with ID ${INFLUX_AUTH_ID}"
+        [ -z "$INFLUX_AUTH_ID" ] && influx v1 auth create --username {{ influx.username }} --password {{ metrics_secrets.INFLUX_V1_PASSWORD }} --org {{ influx.org }} --read-bucket ${INFLUX_BUCKET_ID} || echo "Auth found with ID ${INFLUX_AUTH_ID}"
       no_log: true # Prevent logging of sensitive credentials
 
 ### Configure telegraf
@@ -122,12 +217,12 @@
         owner: telegraf
         group: telegraf
         mode: "0640"
-      no_log: true # Contains AWS secrets
 
     - name: Conf template for grafana datasource conf
       template:
         src: telegraf/telegraf.conf
         dest: /etc/telegraf/telegraf.conf
+      no_log: true
 
     - name: Add telegraf user to adm group
       user:
@@ -162,11 +257,19 @@
       template:
         src: grafana/grafana.ini
         dest: /etc/grafana/grafana.ini
+        owner: root
+        group: grafana
+        mode: "0640"
+      no_log: true
 
     - name: Conf template for grafana datasource conf
       template:
         src: grafana/datasource.yaml
         dest: /etc/grafana/provisioning/datasources/graf_ds.yaml
+        owner: root
+        group: grafana
+        mode: "0640"
+      no_log: true
 
     - name: Conf template for grafana dashboard conf
       template:

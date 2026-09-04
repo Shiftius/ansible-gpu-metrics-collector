@@ -2,21 +2,20 @@
 
 ## Security Notice
 
-This setup handles sensitive AWS credentials and database passwords. The following security measures are implemented:
+New installations use independent, per-host local credentials for InfluxDB, Telegraf compatibility access, and Grafana. Timestream output and AWS credential files are not configured.
 
 ### Security Features
 - **No Debug Output**: Shell scripts run with `set +x` to prevent command echoing
-- **No Secret Echoing**: Sensitive values are written to protected config files without command tracing
-- **Secure File Permissions**: Configuration files containing secrets are created with restrictive permissions (0640)
-- **Environment Variables**: Secrets are passed via environment variables, not command-line arguments where possible
+- **No Secret Echoing**: Local values are generated on the host without command tracing
+- **Secure File Permissions**: The source-of-truth credential file is `/etc/brev/metrics-secrets.env`, owned by root with mode `0600`
+- **Independent Values**: InfluxDB admin, Telegraf operator, v1 compatibility, and Grafana admin credentials are distinct
 - **Legacy Ansible Path Preserved**: The playbook and roles remain available for inspection or manual use, but `setup.sh` now defaults to raw shell execution
 
 ### Best Practices
 1. **Never commit secrets** to version control
 2. **Prefer environment variables** over command-line arguments for secrets
 3. **Limit log verbosity** in production environments
-4. **Rotate credentials** regularly
-5. **Use IAM roles** instead of access keys when running on AWS infrastructure
+4. **Do not copy the per-host credential file** between systems
 
 ### Running Securely
 
@@ -26,7 +25,7 @@ When run from a checkout, `setup.sh` also uses local Grafana assets instead of f
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
-  bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+  bash -s -- environmentID='ID'
 ```
 
 To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
@@ -47,12 +46,9 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
 In the default tolerant mode, a Fleet download or installation failure is logged and the command exits
 successfully. With `--strict-failures`, the same failure returns a nonzero exit code.
 
-The raw installer also accepts environment variables, which keeps secrets out of the process arguments:
+The raw installer accepts the environment ID through the environment:
 
 ```bash
-export AWS_TIMESTREAM_ACCESS_KEY="your-key"
-export AWS_TIMESTREAM_SECRET_KEY="your-secret"
-export AWS_TIMESTREAM_DATABASE="your-db"
 export ENVIRONMENT_ID="your-environment-id"
 
 curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | bash
@@ -60,7 +56,7 @@ curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collect
 
 `setup-raw.sh` can still be invoked directly from a checkout or via curl when you do not need the compatibility wrapper.
 For compatibility with the former Ansible extra-vars flow, the raw installer accepts the existing setup values
-for `aws_timestream_*`, `environmentID`, `domain`, `host_prefix`, `skip_hostname_conf`, `influx.*`,
+for `environmentID`, `domain`, `host_prefix`, `skip_hostname_conf`, `influx.*`,
 `grafana.subpath`, `fleet_amd64_url`, `fleet_pkg_amd64`, `fleet_arm64_url`, `fleet_pkg_arm64`, `metadata_path`, and `metadata_backup`.
 
 #### Benchmarking Raw vs. Ansible Setup
@@ -68,41 +64,30 @@ Use `reset-setup.sh` between runs to remove the metrics packages, generated conf
 
 ```bash
 sudo ./reset-setup.sh --purge-benchmark-cache
-time ./setup-via-ansible.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+time ./setup-via-ansible.sh environmentID='ID'
 
 sudo ./reset-setup.sh --purge-benchmark-cache
-time ./setup.sh aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+time ./setup.sh environmentID='ID'
 ```
 
 For a data-preserving reset, use `sudo ./reset-setup.sh --keep-data`. The reset script does not restore the hostname.
 
-#### Method 1: Interactive Secure Input (RECOMMENDED)
+#### Method 1: Environment Variables
 ```bash
-# Use the secure wrapper script for interactive credential input
-chmod +x secure-run.sh
-./secure-run.sh
-# Enter credentials when prompted (input is hidden)
-```
-
-#### Method 2: Environment Variables
-```bash
-# Pass secrets as environment variables
-export AWS_TIMESTREAM_ACCESS_KEY="your-key"
-export AWS_TIMESTREAM_SECRET_KEY="your-secret"
-export AWS_TIMESTREAM_DATABASE="your-db"
+export ENVIRONMENT_ID="your-environment-id"
 
 # Run setup; it delegates to setup-raw.sh and auto-detects env vars
 ./setup.sh
 ```
 
-#### Method 3: Direct Invocation (Use Carefully)
+#### Method 2: Direct Invocation
 ```bash
 # NEVER run with -x flag or debugging enabled!
 # The script will refuse to run if debugging is detected
 
 # Download and run (secrets protected)
 curl -sSL https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main/setup.sh | \
-  bash -s -- aws_timestream_access_key='KEY' aws_timestream_secret_key='SECRET' aws_timestream_database='DB' environmentID='ID'
+  bash -s -- environmentID='ID'
 ```
 
 To keep the current hostname unchanged, append `--skip-hostname-conf` to the `bash -s -- ...` arguments.
@@ -114,8 +99,11 @@ The scripts include multiple layers of security:
 1. **Debug Mode Detection**: Scripts refuse `bash -x` or `sh -x` before doing work, while preserving the default tolerated exit behavior
 2. **Trace Protection**: Detects and blocks shell tracing (`set -x`)
 3. **History Disabled**: Command history is disabled during execution
-4. **Environment Credential Flow**: Environment variables are supported to avoid putting secrets in command-line arguments
-5. **Secure Permissions**: Generated secret-bearing files are written with restrictive permissions
+4. **Local Generation**: Metrics credentials are generated independently on each new host
+5. **Existing-Host Guard**: An initialized InfluxDB without the matching credential record is left unchanged and requires explicit operator handling
+6. **No Timestream Credentials**: Future installations do not configure Timestream output or write AWS credentials
+
+This change is intentionally new-install-only. It does not rotate, remove, or repair credentials on existing Brev hosts.
 
 ### Debugging Safely
 If you need to debug, use targeted verbosity:
