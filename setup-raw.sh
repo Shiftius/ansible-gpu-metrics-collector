@@ -11,10 +11,12 @@ set +x
 export HISTFILE=/dev/null
 
 readonly DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/Shiftius/ansible-gpu-metrics-collector/main"
-readonly DEFAULT_FLEET_AMD64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/f2a389a0c40047587c32daafd34d407bc130075f8d29decf2c0aad5f60464043"
-readonly DEFAULT_FLEET_PKG_AMD64="fleet-1.0.0_amd64.deb"
-readonly DEFAULT_FLEET_ARM64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.0/80c7434e73e1c5dff018a8a8c21ed464446cb7d25170b5644ebef84805ac6edb"
-readonly DEFAULT_FLEET_PKG_ARM64="fleet-1.0.0_arm64.deb"
+readonly DEFAULT_FLEET_AMD64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.2/7c84ac452679f39ef48e94146f45d83c258f7d4109d33ae86fbf33108a4d47ef"
+readonly DEFAULT_FLEET_PKG_AMD64="fleet-osquery_1.35.0_amd64.deb"
+readonly DEFAULT_FLEET_AMD64_SHA256="7c84ac452679f39ef48e94146f45d83c258f7d4109d33ae86fbf33108a4d47ef"
+readonly DEFAULT_FLEET_ARM64_URL="https://github.com/Shiftius/ansible-gpu-metrics-collector/releases/download/pkg-1.0.2/9fedfe08850fc906aa968e61c4568633e9215c1f1d8b05edd3e4418788347a7c"
+readonly DEFAULT_FLEET_PKG_ARM64="fleet-osquery_1.35.0_arm64.deb"
+readonly DEFAULT_FLEET_ARM64_SHA256="9fedfe08850fc906aa968e61c4568633e9215c1f1d8b05edd3e4418788347a7c"
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd || true)"
@@ -28,10 +30,21 @@ DOMAIN_VALUE="${DOMAIN:-${domain:-domain.com}}"
 ENVIRONMENT_ID_VALUE="${ENVIRONMENT_ID:-${environmentID:-}}"
 FLEET_AMD64_URL="${FLEET_AMD64_URL:-${fleet_amd64_url:-$DEFAULT_FLEET_AMD64_URL}}"
 FLEET_PKG_AMD64="${FLEET_PKG_AMD64:-${fleet_pkg_amd64:-$DEFAULT_FLEET_PKG_AMD64}}"
+FLEET_AMD64_SHA256="${FLEET_AMD64_SHA256:-${fleet_amd64_sha256:-$DEFAULT_FLEET_AMD64_SHA256}}"
 FLEET_ARM64_URL="${FLEET_ARM64_URL:-${fleet_arm64_url:-$DEFAULT_FLEET_ARM64_URL}}"
 FLEET_PKG_ARM64="${FLEET_PKG_ARM64:-${fleet_pkg_arm64:-$DEFAULT_FLEET_PKG_ARM64}}"
+FLEET_ARM64_SHA256="${FLEET_ARM64_SHA256:-${fleet_arm64_sha256:-$DEFAULT_FLEET_ARM64_SHA256}}"
+ORBIT_FLEET_URL_VALUE="${ORBIT_FLEET_URL:-}"
+ORBIT_ENROLL_SECRET_VALUE="${ORBIT_ENROLL_SECRET:-}"
+ORBIT_DEFAULTS_PATH="${ORBIT_DEFAULTS_PATH:-/etc/default/orbit}"
+FLEET_RUNTIME_DIR="${FLEET_RUNTIME_DIR:-/run/fleet-enrollment}"
+FLEET_SECRET_PATH="${FLEET_SECRET_PATH:-${FLEET_RUNTIME_DIR}/secret}"
+FLEET_SYSTEMD_DROPIN_DIR="${FLEET_SYSTEMD_DROPIN_DIR:-/run/systemd/system/orbit.service.d}"
+FLEET_NODE_KEY_PATH="${FLEET_NODE_KEY_PATH:-/opt/orbit/secret-orbit-node-key.txt}"
 SELECTED_FLEET_URL=""
 SELECTED_FLEET_PKG=""
+SELECTED_FLEET_SHA256=""
+FLEET_PACKAGE_INSTALLED=false
 GRAFANA_SUBPATH="${GRAFANA_SUBPATH:-metrics}"
 HOST_PREFIX="${HOST_PREFIX:-brev}"
 INFLUX_BUCKET="${INFLUX_BUCKET:-lp}"
@@ -97,6 +110,7 @@ run_main() {
     set +e
     (
         set -Eeuo pipefail
+        trap cleanup_transient_fleet_enrollment EXIT
         main "$@"
     )
     status="$?"
@@ -375,6 +389,10 @@ parse_args() {
                 value="${arg#*=}"
                 FLEET_PKG_AMD64="$value"
                 ;;
+            fleet_amd64_sha256=*|FLEET_AMD64_SHA256=*)
+                value="${arg#*=}"
+                FLEET_AMD64_SHA256="$value"
+                ;;
             fleet_arm64_url=*|FLEET_ARM64_URL=*)
                 value="${arg#*=}"
                 FLEET_ARM64_URL="$value"
@@ -382,6 +400,20 @@ parse_args() {
             fleet_pkg_arm64=*|FLEET_PKG_ARM64=*)
                 value="${arg#*=}"
                 FLEET_PKG_ARM64="$value"
+                ;;
+            fleet_arm64_sha256=*|FLEET_ARM64_SHA256=*)
+                value="${arg#*=}"
+                FLEET_ARM64_SHA256="$value"
+                ;;
+            ORBIT_FLEET_URL=*)
+                value="${arg#*=}"
+                ORBIT_FLEET_URL_VALUE="${value#\'}"
+                ORBIT_FLEET_URL_VALUE="${ORBIT_FLEET_URL_VALUE%\'}"
+                ;;
+            ORBIT_ENROLL_SECRET=*)
+                value="${arg#*=}"
+                ORBIT_ENROLL_SECRET_VALUE="${value#\'}"
+                ORBIT_ENROLL_SECRET_VALUE="${ORBIT_ENROLL_SECRET_VALUE%\'}"
                 ;;
             *)
                 echo_warn "Ignoring unsupported argument: ${arg%%=*}"
@@ -473,6 +505,23 @@ handle_fleet_install_failure() {
     return 1
 }
 
+fleet_enrollment_configured() {
+    [[ -n "$ORBIT_FLEET_URL_VALUE" && ( -n "$ORBIT_ENROLL_SECRET_VALUE" || -s "$FLEET_SECRET_PATH" ) ]]
+}
+
+stage_incoming_fleet_enroll_secret() {
+    if [[ -z "$ORBIT_ENROLL_SECRET_VALUE" ]]; then
+        return
+    fi
+
+    install -d -m 0700 -o root -g root "$FLEET_RUNTIME_DIR"
+    printf '%s\n' "$ORBIT_ENROLL_SECRET_VALUE" > "$FLEET_SECRET_PATH"
+    chown root:root "$FLEET_SECRET_PATH"
+    chmod 0600 "$FLEET_SECRET_PATH"
+    unset ORBIT_ENROLL_SECRET
+    ORBIT_ENROLL_SECRET_VALUE=""
+}
+
 detect_debian_architecture() {
     if command -v dpkg >/dev/null 2>&1; then
         dpkg --print-architecture
@@ -490,10 +539,12 @@ select_fleet_package() {
         amd64)
             SELECTED_FLEET_URL="$FLEET_AMD64_URL"
             SELECTED_FLEET_PKG="$FLEET_PKG_AMD64"
+            SELECTED_FLEET_SHA256="$FLEET_AMD64_SHA256"
             ;;
         arm64)
             SELECTED_FLEET_URL="$FLEET_ARM64_URL"
             SELECTED_FLEET_PKG="$FLEET_PKG_ARM64"
+            SELECTED_FLEET_SHA256="$FLEET_ARM64_SHA256"
             ;;
         *)
             echo_error "Unsupported Fleet package architecture: ${architecture}"
@@ -504,10 +555,21 @@ select_fleet_package() {
     echo_info "Using Fleet package for ${architecture}: ${SELECTED_FLEET_PKG}"
 }
 
+verify_fleet_package() {
+    local actual_sha256
+
+    actual_sha256="$(sha256sum "$1" | awk '{print $1}')"
+    [[ "$actual_sha256" == "$SELECTED_FLEET_SHA256" ]]
+}
+
 install_fleet_package() {
     local pkg_path
 
     echo_info "Installing Fleet package..."
+    if ! fleet_enrollment_configured; then
+        handle_fleet_install_failure "ORBIT_FLEET_URL and ORBIT_ENROLL_SECRET are not configured"
+        return
+    fi
     if ! select_fleet_package; then
         handle_fleet_install_failure "Fleet package selection failed"
         return
@@ -519,16 +581,34 @@ install_fleet_package() {
         handle_fleet_install_failure "Fleet package download failed"
         return
     fi
+    if ! verify_fleet_package "$pkg_path"; then
+        rm -f "$pkg_path"
+        handle_fleet_install_failure "Fleet package checksum verification failed"
+        return
+    fi
 
     if ! apt_install "$pkg_path"; then
+        rm -f "$pkg_path"
         handle_fleet_install_failure "Fleet package installation failed"
+        return
     fi
+
+    rm -f "$pkg_path"
+    FLEET_PACKAGE_INSTALLED=true
+    configure_fleet_enrollment
 }
 
 install_metrics_packages() {
     local pkg_path
 
     echo_info "Installing metrics packages..."
+    if ! fleet_enrollment_configured; then
+        if ! handle_fleet_install_failure "ORBIT_FLEET_URL and ORBIT_ENROLL_SECRET are not configured"; then
+            return 1
+        fi
+        apt_install grafana influxdb2 influxdb2-cli telegraf
+        return
+    fi
     if ! select_fleet_package; then
         if [[ "$TOLERATE_FAILURES" == false ]]; then
             return 1
@@ -550,10 +630,25 @@ install_metrics_packages() {
         apt_install grafana influxdb2 influxdb2-cli telegraf
         return
     fi
+    if ! verify_fleet_package "$pkg_path"; then
+        rm -f "$pkg_path"
+        if [[ "$TOLERATE_FAILURES" == false ]]; then
+            echo_error "Fleet package checksum verification failed."
+            return 1
+        fi
 
-    if apt_install grafana influxdb2 influxdb2-cli telegraf "$pkg_path"; then
+        echo_warn "Fleet package checksum verification failed; installing metrics packages without Fleet."
+        apt_install grafana influxdb2 influxdb2-cli telegraf
         return
     fi
+
+    if apt_install grafana influxdb2 influxdb2-cli telegraf "$pkg_path"; then
+        rm -f "$pkg_path"
+        FLEET_PACKAGE_INSTALLED=true
+        return
+    fi
+
+    rm -f "$pkg_path"
 
     if [[ "$TOLERATE_FAILURES" == false ]]; then
         echo_error "Combined metrics and Fleet package installation failed."
@@ -562,6 +657,80 @@ install_metrics_packages() {
 
     echo_warn "Combined metrics and Fleet package install failed; retrying metrics packages without Fleet."
     apt_install grafana influxdb2 influxdb2-cli telegraf
+}
+
+cleanup_transient_fleet_enrollment() {
+    rm -f "$FLEET_SECRET_PATH" "${FLEET_SYSTEMD_DROPIN_DIR}/enrollment.conf"
+    rmdir "$FLEET_RUNTIME_DIR" "$FLEET_SYSTEMD_DROPIN_DIR" 2>/dev/null || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
+configure_fleet_enrollment() {
+    local attempt
+    local defaults_tmp
+    local enrollment_succeeded=false
+
+    if [[ "$FLEET_PACKAGE_INSTALLED" != true ]]; then
+        return
+    fi
+
+    echo_info "Configuring optional Fleet enrollment..."
+
+    defaults_tmp="$(mktemp)"
+    sed -E '/^ORBIT_(FLEET_URL|ENROLL_SECRET|ENROLL_SECRET_PATH|HOST_IDENTIFIER)=/d' \
+        "$ORBIT_DEFAULTS_PATH" > "$defaults_tmp"
+    install -m 0600 "$defaults_tmp" "$ORBIT_DEFAULTS_PATH"
+    rm -f "$defaults_tmp"
+    printf 'ORBIT_FLEET_URL=%s\n' "$ORBIT_FLEET_URL_VALUE" >> "$ORBIT_DEFAULTS_PATH"
+    if ! grep -qx 'ORBIT_ENABLE_SCRIPTS=true' "$ORBIT_DEFAULTS_PATH"; then
+        printf 'ORBIT_ENABLE_SCRIPTS=true\n' >> "$ORBIT_DEFAULTS_PATH"
+    fi
+
+    install -d -m 0700 "$FLEET_RUNTIME_DIR"
+    install -d -m 0755 "$FLEET_SYSTEMD_DROPIN_DIR"
+    [[ -s "$FLEET_SECRET_PATH" ]] || {
+        handle_fleet_install_failure "Transient Fleet enrollment secret is unavailable"
+        return
+    }
+
+    printf '%s\n' \
+        '[Service]' \
+        "Environment=\"ORBIT_ENROLL_SECRET_PATH=${FLEET_SECRET_PATH}\"" \
+        > "${FLEET_SYSTEMD_DROPIN_DIR}/enrollment.conf"
+    chmod 0600 "${FLEET_SYSTEMD_DROPIN_DIR}/enrollment.conf"
+
+    if systemctl daemon-reload \
+        && systemctl enable orbit.service \
+        && systemctl restart orbit.service; then
+        for attempt in {1..12}; do
+            if [[ -s "$FLEET_NODE_KEY_PATH" ]]; then
+                enrollment_succeeded=true
+                break
+            fi
+            sleep 5
+        done
+    fi
+
+    cleanup_transient_fleet_enrollment
+
+    if [[ "$enrollment_succeeded" != true ]]; then
+        handle_fleet_install_failure "Fleet enrollment did not produce a node key"
+        return
+    fi
+
+    if ! systemctl restart orbit.service \
+        || ! systemctl is-active --quiet orbit.service \
+        || [[ ! -s "$FLEET_NODE_KEY_PATH" ]]; then
+        handle_fleet_install_failure "Fleet did not remain connected after transient secret cleanup"
+        return
+    fi
+
+    if grep -Eq '^ORBIT_(ENROLL_SECRET|ENROLL_SECRET_PATH|HOST_IDENTIFIER)=' "$ORBIT_DEFAULTS_PATH"; then
+        handle_fleet_install_failure "Persistent Fleet enrollment or identity configuration was detected"
+        return
+    fi
+
+    echo_info "Fleet enrolled and restarted without persistent enrollment material."
 }
 
 systemctl_enable_restart() {
@@ -1014,6 +1183,7 @@ collect_hardware_metadata() {
 main() {
     parse_args "$@"
     require_root
+    stage_incoming_fleet_enroll_secret
     readonly HOSTID="$(detect_hostid)"
     export HOSTID DOMAIN_VALUE GRAFANA_SUBPATH
 
@@ -1032,6 +1202,7 @@ main() {
     collect_hardware_metadata || echo_warn "Hardware metadata collection failed; continuing."
     configure_repositories
     install_metrics_packages
+    configure_fleet_enrollment
     configure_influxdb
     configure_telegraf
     configure_grafana
