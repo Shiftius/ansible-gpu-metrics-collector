@@ -260,6 +260,12 @@ test_metrics_credentials_are_independent_and_local_only() {
         || fail "Fixed legacy metrics password remains in an install path"
     ! grep -Eq 'outputs\.timestream|AWS_(ACCESS_KEY|SECRET_KEY|TIMESTREAM_DB)' "${repo_root}/setup-raw.sh" \
         || fail "Raw installer still configures Timestream or AWS credentials"
+    grep -Eq '^http_addr[[:space:]]*=[[:space:]]*127\.0\.0\.1$' \
+        "${repo_root}/roles/telegraf_config/templates/grafana/grafana.ini" \
+        || fail "Grafana is not restricted to the loopback interface"
+    ! grep -Eq '^http_addr[[:space:]]*=[[:space:]]*0\.0\.0\.0$' \
+        "${repo_root}/roles/telegraf_config/templates/grafana/grafana.ini" \
+        || fail "Grafana still listens on all IPv4 interfaces"
     grep -q 'METRICS_SECRETS_FILE="${METRICS_SECRETS_FILE:-/etc/brev/metrics-secrets.env}"' "${repo_root}/setup-raw.sh" \
         || fail "Raw installer does not persist new-host local credentials"
 
