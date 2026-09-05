@@ -735,17 +735,19 @@ EOF
 render_grafana_ini() {
     local template_file="$1"
     local output_file="$2"
-    local hostid domain subpath
+    local hostid domain subpath grafana_password
 
     hostid="$(escape_sed_replacement "$HOSTID")"
     domain="$(escape_sed_replacement "$DOMAIN_VALUE")"
     subpath="$(escape_sed_replacement "$GRAFANA_SUBPATH")"
+    grafana_password="$(escape_sed_replacement "$GRAFANA_ADMIN_PASSWORD")"
 
     sed \
         -e "s@{{ hostid }}@${hostid}@g" \
         -e "s@{{ domain }}@${domain}@g" \
         -e "s@{{ grafana.subpath }}@${subpath}@g" \
-        -e "s@^;admin_password = admin$@admin_password = ${GRAFANA_ADMIN_PASSWORD}@" \
+        -e "s@{{ metrics_secrets.GRAFANA_ADMIN_PASSWORD }}@${grafana_password}@g" \
+        -e "s@^;admin_password = admin\$@admin_password = ${grafana_password}@" \
         "$template_file" > "$output_file"
 }
 
@@ -803,6 +805,9 @@ providers:
   options:
     path: /var/lib/grafana/dashboards
 EOF
+
+    chown root:grafana /etc/grafana/provisioning/dashboards/graf_dash.yaml
+    chmod 0640 /etc/grafana/provisioning/dashboards/graf_dash.yaml
 
     copy_or_download_asset "roles/telegraf_config/templates/grafana/dashboard.json" /var/lib/grafana/dashboards/metrics.json 0644
     chown -R grafana:grafana /var/lib/grafana/dashboards
