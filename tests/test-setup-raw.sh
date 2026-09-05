@@ -266,6 +266,12 @@ test_metrics_credentials_are_independent_and_local_only() {
     ! grep -Eq '^http_addr[[:space:]]*=[[:space:]]*0\.0\.0\.0$' \
         "${repo_root}/roles/telegraf_config/templates/grafana/grafana.ini" \
         || fail "Grafana still listens on all IPv4 interfaces"
+    grep -Fq 'chown root:grafana /etc/grafana/provisioning/dashboards/graf_dash.yaml' \
+        "${repo_root}/setup-raw.sh" \
+        || fail "Grafana dashboard provisioning ownership is not enforced"
+    grep -Fq 'chmod 0640 /etc/grafana/provisioning/dashboards/graf_dash.yaml' \
+        "${repo_root}/setup-raw.sh" \
+        || fail "Grafana dashboard provisioning permissions are not enforced"
     grep -q 'METRICS_SECRETS_FILE="${METRICS_SECRETS_FILE:-/etc/brev/metrics-secrets.env}"' "${repo_root}/setup-raw.sh" \
         || fail "Raw installer does not persist new-host local credentials"
 
@@ -282,6 +288,42 @@ test_metrics_credentials_are_independent_and_local_only() {
     fi
 }
 
+test_grafana_template_renders_with_shell_arguments() {
+    local template output expected_password
+    template="$(mktemp)"
+    output="$(mktemp)"
+    expected_password="111111111111111111111111111111111111111111111111"
+
+    cat > "$template" <<'EOF'
+domain = {{ domain }}
+root_url = %(protocol)s://%(domain)s:%(http_port)s/{{ grafana.subpath }}/
+host = {{ hostid }}
+admin_password = {{ metrics_secrets.GRAFANA_ADMIN_PASSWORD }}
+EOF
+
+    (
+        set -- an-unrelated-setup-argument
+        HOSTID="test-host"
+        DOMAIN_VALUE="test.example"
+        GRAFANA_SUBPATH="metrics"
+        GRAFANA_ADMIN_PASSWORD="$expected_password"
+        render_grafana_ini "$template" "$output"
+    )
+
+    grep -Fxq 'domain = test.example' "$output" \
+        || fail "Grafana domain placeholder was not rendered"
+    grep -Fxq 'root_url = %(protocol)s://%(domain)s:%(http_port)s/metrics/' "$output" \
+        || fail "Grafana subpath placeholder was not rendered"
+    grep -Fxq 'host = test-host' "$output" \
+        || fail "Grafana host placeholder was not rendered"
+    grep -Fxq "admin_password = ${expected_password}" "$output" \
+        || fail "Grafana admin password placeholder was not rendered"
+    ! grep -q '{{' "$output" \
+        || fail "Grafana template retained an unresolved placeholder"
+
+    rm -f "$template" "$output"
+}
+
 test_fleet_package_selection
 test_arm64_install_uses_arm_package
 test_fleet_failure_is_tolerated_by_default
@@ -293,5 +335,6 @@ test_full_setup_fleet_download_failure_respects_tolerance_mode
 test_fleet_only_skips_metrics_stack
 test_full_setup_retains_metrics_stack
 test_metrics_credentials_are_independent_and_local_only
+test_grafana_template_renders_with_shell_arguments
 
 echo "PASS: setup-raw mode and Fleet failure handling"
